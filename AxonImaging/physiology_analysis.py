@@ -1,14 +1,18 @@
 #Author: Rylan Larsen
 from scipy.ndimage import gaussian_filter1d
 import numpy as np
+from scipy.signal import convolve, boxcar
 
+from signal_processing import threshold_greater
 
-def get_processed_running_speed (vsig,vref,sample_freq, smooth_filter_sigma = 0.05, wheel_diameter = 16.51, positive_speed_threshold= 50, negative_speed_threshold= -5):
+    
+    
+def get_processed_running_speed (vsig,vref_mean,sample_freq, smooth_filter_sigma = 0.05, wheel_diameter = 16.51, positive_speed_threshold= 50, negative_speed_threshold= -5):
     ''' Returns the running speed given voltage changes from an encoder wheel. Speeds are smoothed and outlier
     values above or below arbrituarly defined thresholds are set as NaN. 
     
     :param Vsig: voltage signal which changes as a function of wheel movement (running)
-    :param Vref: reference voltage (typically 5V +/- small offset that is encoder dependent
+    :param Vref_mean: reference voltage (typically 5V +/- small offset that is encoder dependent. Best way to calculate has been to use np.median(vref[np.abs(vref)<20]) 
     :param sample_freq: sampling frequency which Vsig and Vref are acquired at
     :param smooth_filter_sigma: value used for guassian filtering 
     :param wheel_diameter: diameter of running wheel
@@ -17,8 +21,7 @@ def get_processed_running_speed (vsig,vref,sample_freq, smooth_filter_sigma = 0.
     :param  units: whether to return in terms of seconds (dependent on the passed-in sample freq) or samples
     :return: smooth traced of running speed in cm/s per sample with outliers set to NaN
     '''
-    
-    vref_mean = np.median(vref[np.abs(vref)<20]) 
+        
     position_arc = vsig*(2.*np.pi)/vref_mean 
     position_arc_smooth = gaussian_filter1d(position_arc, int(smooth_filter_sigma*sample_freq))
     speed_arc = np.append(np.diff(position_arc_smooth),0) * sample_freq
@@ -38,36 +41,6 @@ def get_processed_running_speed (vsig,vref,sample_freq, smooth_filter_sigma = 0.
 
 
     return speed_smooth
-
-
-
-def stim_df_f (arr, baseline_period, frame_rate=30):
-    '''calculates delta f/f where f0 is the baseline period preceding a stimulus
-
-    #param arr: array of raw fluorescence traces to calculate df/f from. This should already encompass the baseline period, stimulus period, and post-stimulus period.
-    #param baseline_period: amount of time, in seconds, to use for the baseline period
-    #param frame_rate: imaging frame rate, default=30. This is used in determining the number of frames to extract for the baseline period.'''
-    arr=np.asarray(arr)
-    baseline_frames=int(baseline_period*frame_rate)
-   
-    
-    if arr.ndim>1:
-        df_fs=[]
-
-        for xx in range(np.shape(arr)[0]):
-            f_o=np.mean(arr[xx][0:baseline_frames-1])
-            delta_f=arr[xx]-f_o
-            df_f=delta_f/f_o
-            df_fs.append(df_f)
-        return np.array(df_fs)
-    
-    else:
-        f_o=np.mean(arr[0:baseline_frames-1])
-        delta_f=arr-f_o
-        df_f=delta_f/f_o
-    
-        return df_f
-    
     
 
 def get_auditory_onset_times(microphone, sample_freq, threshold=1, stdev_samples=10,filter_width=20):
@@ -81,8 +54,6 @@ def get_auditory_onset_times(microphone, sample_freq, threshold=1, stdev_samples
     :
     :return: the onset sound_times in the units of seconds
     '''
-
-    from scipy.signal import convolve, boxcar
 
     #get the standard deviation across user-defined number of samples
     step=int(stdev_samples)
@@ -103,6 +74,9 @@ def get_auditory_onset_times(microphone, sample_freq, threshold=1, stdev_samples
     sound_times = np.divide(stamps,sample_freq)
     print ('total number of sound presentations found = '+ str(len(sound_times)))
     return sound_times
+
+
+
 
 
 def microphone_to_dB (signal, sensitivity=250, pre_amp_gain=12):

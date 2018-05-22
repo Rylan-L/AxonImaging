@@ -2,14 +2,14 @@
 """
 Created on Tue Apr 24 14:46:56 2018
 
-@author: rylanl
+@author: Rylan Larsen
 """
 
 import numpy as np
+import math
 
 
 def threshold_greater(data, threshold=0):
-    #from Jun Zhuang
     pos = data > threshold
     return (~pos[:-1] & pos[1:]).nonzero()[0]
 
@@ -65,7 +65,7 @@ def get_values_from_event_times (signal_trace, signal_ts, events,total_dur=0,rel
         index=np.argmin(np.abs((signal_ts+relative_time)-events[xx]))
         
         if total_dur>0:
-            frame_dur=1/np.mean(np.diff(signal_ts))
+            frame_dur=1./np.mean(np.diff(signal_ts))
             values.append(signal_trace[index:(index+int(round(total_dur*frame_dur)))])
         
         else:
@@ -224,8 +224,7 @@ def signal_to_mean_noise (traces, sample_freq, signal_range, noise_range):
     :Return log10 of the signal-to-noise for each trace
     
     '''
-    import math
-    
+        
     snr=[]
     
     for xx in range(len(traces)):
@@ -273,8 +272,7 @@ def get_STA_traces_stamps(trace, frame_ts, event_onset_times, chunk_start, chunk
     
     traces = []
     df_traces=[]
-    n = 0
-    
+   
     
     if np.shape(event_onset_times):
         
@@ -284,7 +282,7 @@ def get_STA_traces_stamps(trace, frame_ts, event_onset_times, chunk_start, chunk
             chunk_end_frame_ind = chunk_start_frame_ind + chunk_frame_dur
                     
             if verbose:
-                print 'Period:',int(n),' Starting frame index:',chunk_start_frame_ind,'; Ending frame index', chunk_end_frame_ind
+                print 'Period:',int(x),' Starting frame index:',chunk_start_frame_ind,'; Ending frame index', chunk_end_frame_ind
             
             if chunk_end_frame_ind <= trace.shape[0]:
                 
@@ -292,10 +290,10 @@ def get_STA_traces_stamps(trace, frame_ts, event_onset_times, chunk_start, chunk
                 traces.append(curr_trace)
                 
                             
-                df_curr_trace=stim_df_f(curr_trace, baseline_period=chunk_start, frame_rate=30)
+                df_curr_trace=stim_df_f(curr_trace, baseline_period=abs(chunk_start), frame_rate=30.)
                 df_traces.append(df_curr_trace)
                 
-                n += 1
+                
             else:
                 print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus', chunk_end_frame_ind
                 continue
@@ -308,12 +306,12 @@ def get_STA_traces_stamps(trace, frame_ts, event_onset_times, chunk_start, chunk
         
         curr_trace=trace[chunk_start_frame_ind:chunk_end_frame_ind].astype(np.float32)
         traces = curr_trace
-        df_traces=stim_df_f(curr_trace, baseline_period=chunk_start, frame_rate=30)
+        df_traces=stim_df_f(curr_trace, baseline_period=chunk_start, frame_rate=30.)
         
     if dff==True:
-        return df_traces
+        return np.asarray(df_traces)
     elif dff==False:
-        return traces     
+        return np.asarray(traces)     
 
 
 
@@ -354,7 +352,7 @@ def get_event_trig_avg_stamps(trace, time_stamps, event_onset_times, event_end_t
 
 
 
-def get_STA_traces_samples (trace, event_onset_times, chunk_start, total_dur, sample_freq, dff=True, verbose=True):
+def get_STA_traces_samples (trace, event_onset_times, chunk_start, total_dur, sample_freq, verbose=True):
     '''
     Get stimulus-triggered average(STA) trace for data where the units are not already in terms of seconds, but are in terms of continous samples (analog). (constant periods, analog)
     In this instance, traces are caclulated around a stimulus of constant, known time.
@@ -569,7 +567,7 @@ def downsample_TS_by_target_TS(signal, signal_ts, target_ts, time_around=0.0,ver
     :param time_around: amount of time in fraction of target_ts to average before and after to create a 'downsample'
                         Example: time_around= 0.5; for a 30 hz target SF, each sample is collected at 33 ms. 
                         time around in this instance is 16.5 ms. Therefore, for the nearest signal_ts to a given target_ts,
-                        any signal data 49.5 ms before and 49.5 ms after is averaged in to produce a single time point.
+                        any signal data 16.5 ms before and 16.5 ms after is averaged in to produce a single time point.
 
     :return: the signal trace downsampled to the frequency of the timestamps (target_ts)
     '''
@@ -637,9 +635,96 @@ def norm_percentile (traces, percentile=10,return_percent=False):
         dff[xx] = (traces[xx] - np.absolute(np.percentile(traces[xx],percentile)) / np.absolute(np.percentile(traces[xx],percentile)))
         
     if return_percent==True:
-    	return dff*100
+    	return dff*100.
     elif return_percent==False:
     	return dff
     else:
     	print ('No valid units specified for how to return Df_F trace (abs or %). Please specify and re-run')
     	return
+
+
+def stim_df_f (arr, baseline_period, frame_rate=30.):
+    '''calculates delta f/f where f0 is the baseline period preceding a stimulus
+
+    #param arr: array of raw fluorescence traces to calculate df/f from. This should already encompass the baseline period, stimulus period, and post-stimulus period.
+    #param baseline_period: amount of time, in seconds, to use for the baseline period
+    #param frame_rate: imaging frame rate, default=30. This is used in determining the number of frames to extract for the baseline period.'''
+    arr=np.asarray(arr)
+    baseline_frames=int(abs(baseline_period)*frame_rate)
+        
+    if arr.ndim==2:
+        
+        df_f=[stim_df_f(arr=row,baseline_period=baseline_period, frame_rate=frame_rate) for row in arr]
+
+    elif arr.ndim==3:
+
+        df_f=[[stim_df_f(arr=n,baseline_period=baseline_period, frame_rate=frame_rate) for n in row] for row in arr]
+
+    elif arr.ndim==1:
+        f_o=np.mean(arr[0:baseline_frames-1],dtype=np.float32)
+        delta_f=np.subtract(arr,f_o,dtype=np.float32)
+        df_f=np.true_divide(delta_f,f_o)
+    
+    return df_f
+
+def batch_stimulus_traces(signals, onsets, pre_gap,stim_dur,post_gap,df_f=False):
+    ''' Returns a stimulus/event triggered response across many signals, all aligned to the same onset. Example, at the onset
+    of a sound, align other time-series to the onset and include an arbituary amount of time before and after.
+    
+    :param stim_dict: a dictionary of t-series tuples in the format: 'key':(signal_trace,time_stamps (digital) OR sampling frequency)
+                     EXAMPLE: 'microphone': (microphone, samplefreq) OR 'green_2P_traces':(green_traces,frame_times)
+    :param onsets: timestamps that each of the t-series should be aligned relative to (seconds)
+    :param pre_gap: relative time BEFORE each time step to include in the onset-aligned trace
+    :param chunkStart: duration of the onset(stimulus). 
+    :param post_gap: relative time AFTER each time step to include in the onset-aligned trace
+    :param dff: whether to return values in terms of change from baseline normalized values (df/f).
+                ONLY applies to digitally-sampled signals (w/ time stamps) who are multidimensional arrays.
+    
+    :return: averaged trace of all chunks
+    '''
+    total_time=abs(pre_gap)+post_gap+stim_dur
+    
+    stimulus_traces={}
+    for keys in signals:
+        #check to see if the second element is a int or float. If so, a sampling frequency has been provided and the signal can
+        #be assumed to be continous (no-timestamps, analog)
+        if isinstance(signals[keys][1], float) or isinstance(signals[keys][1], int) :
+            trace=get_STA_traces_samples(signals[keys][0],event_onset_times=onsets,sample_freq=signals[keys][1],
+                                            chunk_start=pre_gap,total_dur=total_time,verbose=False)
+            time=np.linspace(start=0,stop=np.mean(trace,axis=0).size/signals[keys][1],num=np.mean(trace,axis=0).size)
+            stimulus_traces[keys] = (time,trace)
+            
+        #if the second tuple element is a list or an array, then assume timestamps have been provided and that it is a digital
+        #signal
+        elif isinstance(signals[keys][1], list) or isinstance(signals[keys][1], np.ndarray):
+            
+            #check to see if array multi-dimensional, if so, run through loop
+            if np.asarray(signals[keys][0]).ndim>1:
+                stim_traces=[]
+                sample_dur=1/np.mean(np.diff(signals[keys][1]))
+                for xx in range(len(signals[keys][0])-1):
+                    stim_traces.append(get_STA_traces_stamps(signals[keys][0][xx],frame_ts=signals[keys][1],
+                                                                event_onset_times=onsets, 
+                                                                chunk_start=pre_gap, 
+                                                                chunk_dur=total_time,dff=df_f, verbose=False))
+        
+                time=np.linspace(start=0,stop=np.nanmean(np.nanmean(stim_traces,axis=0),axis=0).size/sample_dur,
+                                 num=np.nanmean(np.nanmean(stim_traces,axis=0),axis=0).size)
+            
+                stimulus_traces[keys] = (time,stim_traces)
+                
+            else:
+            
+                trace=get_STA_traces_stamps(signals[keys][0],frame_ts=signals[keys][1], event_onset_times=onsets,
+                                           chunk_start=pre_gap, chunk_dur=total_time,dff=False, verbose=False)
+                
+                sample_dur=1/np.mean(np.diff(signals[keys][1]))
+                time=np.linspace(start=0,stop=np.nanmean(trace,axis=0).size/sample_dur,num=np.nanmean(trace,axis=0).size)
+                stimulus_traces[keys] = (time,trace)
+            
+        else:
+            print ('invalid data types provided. Please input a dictionary containing tuples')
+            break
+            return
+    #return a dictionary with keys as the signal names, and the values are tuples of the format (corresponding time_array, stim_trace)
+    return stimulus_traces

@@ -7,6 +7,8 @@ Created on Thu Feb 01 12:44:08 2018
 Uses code from internal AllenSDK authored by Michael Buice, where noted.
 """
 import numpy as np
+from scipy.ndimage import gaussian_filter1d
+import math
 
 
 
@@ -33,8 +35,6 @@ def replace_nan_with_last_good_value(signal):
     
     :return signal array, lacking NaN values
     '''
-          
-    import math
     signal_clean = signal
     
     #for initialization, set the last good value to the first value
@@ -53,9 +53,17 @@ def replace_nan_with_last_good_value(signal):
             last_good_value = signal[sample]
         
     return signal_clean
+
+def remove_pupil_outliers (pupil_params, pupil_percentile):
+    #calculate the pupil area and set values greater than the threshold using NaN (code chunk from Allen Brain Observatory)
+    area = np.pi*pupil_params.T[3]*pupil_params.T[4]
+    threshold = np.percentile(area[np.isfinite(area)], pupil_percentile)
+    outlier_index = area > threshold
+    pupil_params[outlier_index, :] = np.nan
+    return pupil_params
     
 
-def post_process_pupil(pupil_params, pupil_percentile, replace_nan=False, smooth_filter_sigma=0.0):
+def post_process_pupil(pupil_params, pupil_percentile, replace_nan=False, smooth_filter_sigma=0):
     '''Filter pupil parameters and replace outliers with nan.
 
     :Param pupil_params: array of pupil parameters [x, y, angle, axis1, axis2]
@@ -67,13 +75,11 @@ def post_process_pupil(pupil_params, pupil_percentile, replace_nan=False, smooth
     Return: pupil parameters with outliers replaced with nan and optionally guassian filtered
     '''
     
-    #first calculate the pupil area and set values greater than the threshold using NaN (code chunk from Allen Brain Observatory)
-    area = np.pi*pupil_params.T[3]*pupil_params.T[4]
-    threshold = np.percentile(area[np.isfinite(area)], pupil_percentile)
-    outlier_index = area > threshold
-    pupil_params[outlier_index, :] = np.nan
+    #first calculate the pupil area and set values greater than the threshold using NaN 
     
-    #optionally interpolate
+    pupil_params=remove_pupil_outliers(pupil_params, pupil_percentile)
+    
+    #optionally interpolate across NaN values
     if replace_nan:
         pupil_no_nan = np.zeros(np.shape(pupil_params))
         
@@ -83,8 +89,7 @@ def post_process_pupil(pupil_params, pupil_percentile, replace_nan=False, smooth
         pupil_params=pupil_no_nan
     
     #optionally guassian filter
-    if smooth_filter_sigma!=0.0:
-        from scipy.ndimage import gaussian_filter1d
+    if smooth_filter_sigma!=0:
         
         pupil_filtered = np.zeros(np.shape(pupil_params))
         
@@ -92,8 +97,7 @@ def post_process_pupil(pupil_params, pupil_percentile, replace_nan=False, smooth
             pupil_filtered[:,yy]=gaussian_filter1d(pupil_params[:,yy], int(smooth_filter_sigma))
        
         pupil_params=pupil_filtered
-         
-       
+        
     return pupil_params
 
 

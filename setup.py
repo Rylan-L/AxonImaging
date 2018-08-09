@@ -13,7 +13,6 @@ setup(
     author='Rylan Larsen',
     author_email='RylanL@alleninstitute.org',
     packages=['AxonImaging'],
-    scripts=['AxonImaging/Sample Scripts/Caiman_MotionCorrect_file_list.py','AxonImaging/Segment_Movie_Return_Masks_and_Traces.py'],
     url='https://github.com/Rylan-L/AxonImaging',
     license='LICENSE',
     description='Signal and Image Processing with an Emphasis on Neurophysiology data',

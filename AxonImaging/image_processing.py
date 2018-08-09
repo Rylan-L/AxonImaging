@@ -3,6 +3,7 @@ import cv2
 import tifffile as tf
 import os
 import scipy.ndimage as ni
+import matplotlib.pyplot as plt
 
 
 def split_bin(arr,downsample=0.5,split=True):
@@ -123,7 +124,59 @@ class ROI (object):
             trace = trace + movie_arr[:, int(pixel[0]), int(pixel[1])].flatten().astype(np.float32)
     
         return trace/len(self.pixels[0])
+
+
+class weighted_ROI(ROI):
+
+    def __init__(self, mask):
+        super(weighted_ROI,self).__init__(mask)
+        self.weights = mask[self.pixels]
+
+    def get_weighted_trace_pixelwise(self, mov, is_area_weighted=False):
+        '''
+        return trace of this ROI in a given movie, the contribution of each pixel in the roi was defined by its weight
+        :param is_area_weighted: bool, if False, total area of the mask is calculated in a binary fashion
+                                       if True, total area of mask is calculated in a weighted fashion
+        calculation is done in pixelwise fashion
+        '''
+        pixels = self.get_pixel_array()
+        trace = np.zeros(mov.shape[0], dtype=np.float32)
+        for i, pixel in enumerate(pixels):
+            # trace += mov[:, pixel[0], pixel[1]]  # somehow this is less precise !! do not use
+            trace = trace + self.weights[i] * (mov[:, pixel[0], pixel[1]]).astype(np.float32)
+        # print trace
+        if not is_area_weighted:
+            return trace / self.get_binary_area()
+        elif is_area_weighted:
+            return trace / self.get_weight_sum()
+        else:
+            raise ValueError('is_area_weighted should be a boolean variable.')
+
+    def get_binary_mask(self):
+        '''
+        generate binary mask of the ROI, return 2d array, with 0s and 1s, dtype np.uint8
+        '''
+        mask = np.zeros(self.dimension,dtype=np.uint8)
+        mask[self.pixels] = 1
+        return mask
     
+    def to_h5_group(self, h5Group):
+        '''
+        add attributes and dataset to a h5 data group
+        '''
+        h5Group.attrs['dimension'] = self.dimension
+        h5Group.attrs['description'] = str(self)
+        if self.pixelSizeX is None: h5Group.attrs['pixelSize'] = 'None'
+        else: h5Group.attrs['pixelSize'] = [self.pixelSizeY, self.pixelSizeX]
+        if self.pixelSizeUnit is None: h5Group.attrs['pixelSizeUnit'] = 'None'
+        else: h5Group.attrs['pixelSizeUnit'] = self.pixelSizeUnit
+
+        dataDict = dict(self.__dict__)
+        _ = dataDict.pop('dimension');_ = dataDict.pop('pixelSizeX');_ = dataDict.pop('pixelSizeY');_ = dataDict.pop('pixelSizeUnit')
+        for key, value in dataDict.iteritems():
+            if value is None: h5Group.create_dataset(key,data='None')
+            else: h5Group.create_dataset(key,data=value)
+
     
 def generate_surround_masks(rois, width=15, exclusion=5):
 	'''generates surround/neuropil masks by dilation of an ROI
@@ -149,5 +202,198 @@ def generate_surround_masks(rois, width=15, exclusion=5):
 
 	return neuropil_masks
 
+def downsample_time(movie_path, downsample_by=10, resave_as=''):
+    '''Downsamples a movie in time by averaging (mean) in chunks. Takes input as h5, tif, or numpy array
+
+    #param movie_path: movie as array, h5 file, or tiff file
+    #param downsample_by: how many frames to average together
+    #param resave_as: whether to resave the dowsampled movie as h5 or tiff .Leave as '' to not save anything.
+
+    #returns downsampled array (if not resaving)
+    '''
+
+    #if the file_path is an h5, downsample in chunks by reading each from disk (saves on memory)
+    if movie_path[-2:] == '.h5':
+        h5_file= h5py.File(movie_path,'r')
+        #if h5, currently assumes the movie is stored as the key 'data'
+        movie=h5_file['data']
+        new_file_name=os.path.basename(movie_path)+'_downsampled_by_'+str(downsample_by)
+
+    elif movie_path[-3]=='.tif' or movie_path[-4]=='.tiff':
+        movie=tf.imread(movie_path)
+        new_file_name=os.path.basename(movie_path)+'_downsampled_by_'+str(downsample_by)
+
+    elif type(movie_path) is np.ndarray:
+        movie=movie_path
+        new_file_name='movie'
+    else:
+        raise ('Movie path does not refer to a valid movie type (h5,tif,or array)')
 
 
+    total_frames=movie.shape[0]
+    print ('\n \n total number of movie frames is ' + str(total_frames))
+    final_num_frames = total_frames //downsample_by
+    print ('\n new movie will be '+str(final_num_frames) +' frames')
+        
+    down_list=[]
+    for ii in range(final_num_frames):
+        chunk=movie[(ii*downsample_by):((ii+1)*downsample_by),:,:].astype(np.float)
+        avg_frame=np.mean(chunk,axis=0)
+        down_list.append(avg_frame)
+
+    #resave downsampled movie as tif or H5
+
+    if resave_as=='tif':
+        print ('Saving downsampled movie as tif.....')
+        tf.imsave(new_file_name+'.tif',np.array(down_list))
+
+    elif resave_as=='h5':
+        #or resave downsampled movie H5
+
+        down_h5 = h5py.File(new_file_name+'.h5', 'w')
+        down_h5.create_dataset('data', data=np.array(down_list))
+        down_h5.close()
+
+    elif resave_as=='':
+        return np.array(down_list)
+
+
+def concenate_tifs_folder(path,save=True):
+    '''
+    #param path: folder path that contains a list of labeled tifs that can be sorted numerically by their names (ie 1-10)
+    #param save: whether to save the concentated tifs to disk as a single large tif 
+    '''
+   
+    os.chdir(path)
+
+    file_list = [f for f in os.listdir(path) if f[-3:] == 'tif']
+    file_list.sort()
+    
+    print '\n'.join(file_list)
+    
+    mov = []
+    
+    for n in file_list:
+     
+        mov.append(tf.imread(n))
+        
+    mov = np.concatenate(mov, axis=0)
+    
+    if save==True:
+        f_name, ext = os.path.splitext(n)
+        tf.imsave(f_name + '_concatenated' + ext, mov)
+    
+    else:
+        return mov
+
+
+def int2str(num,length=None):
+    '''
+    generate a string representation for a integer with a given length
+    :param num: non-negative int, input number
+    :param length: positive int, length of the string
+    :return: string represetation of the integer
+    '''
+
+    rawstr = str(int(num))
+    if length is None or length == len(rawstr):return rawstr
+    elif length < len(rawstr): raise ValueError, 'Length of the number is longer then defined display length!'
+    elif length > len(rawstr): return '0'*(length-len(rawstr)) + rawstr
+    
+
+def get_masks(labeled, minArea=None, maxArea=None, isSort=True, keyPrefix = None, labelLength=None):
+    '''
+    From Jun Zhuang's Cortical Mapping Package
+
+
+    get mask dictionary from labeled map (labeled by scipy.ndimage.label function), masks with area smaller than
+    minArea and maxArea will be discarded.
+
+    :param labeled: 2d array with non-negative int, labelled map (ideally the output of scipy.ndimage.label function)
+    :param minArea: positive int, minimum area criterion of retained masks
+    :param maxArea: positive int, maximum area criterion of retained masks
+    :param isSort: bool, sort the masks by area or not
+    :param keyPrefix: str, the key prefix for returned dictionary
+    :param labelLength: positive int, the length of key index
+
+    :return masks: dictionary of 2d binary masks
+    '''
+
+    maskNum = np.max(labeled.flatten())
+    masks = {}
+    for i in range(1, maskNum + 1):
+        currMask = np.zeros(labeled.shape, dtype=np.uint8)
+        currMask[labeled == i] = 1
+
+        if minArea is not None and np.sum(currMask.flatten()) < minArea:
+            continue
+        elif maxArea is not None and np.sum(currMask.flatten()) > maxArea:
+            continue
+        else:
+            if labelLength is not None:
+                #mask_index = ft.int2str(i, labelLength)
+               
+               
+                mask_index= '0'*(labelLength-len(str(i))) + str(i)
+                
+            else:
+                mask_index = str(i)
+
+            if keyPrefix is not None:
+                currKey = keyPrefix + '_' + mask_index
+            else:
+                currKey = mask_index
+            masks.update({currKey: currMask})
+
+    if isSort:
+        
+        masks = sort_masks(masks, keyPrefix=keyPrefix, labelLength=labelLength)
+
+    return masks
+
+def sort_masks(masks, keyPrefix=None, labelLength=3):
+    '''
+    From Jun Zhuang's Cortical Mapping Package
+    
+    sort a dictionary of binary masks, big to small
+    '''
+
+    maskNum = len(masks.keys())
+    order = []
+    for key, mask in masks.iteritems():
+        order.append([key,np.sum(mask.flatten())])
+
+    order = sorted(order, key=lambda a:a[1], reverse=True)
+
+    newMasks = {}
+    for i in range(len(order)):
+        if keyPrefix is not None: currKey = keyPrefix+'_'+'0'*(labelLength-len(str(i))) + str(i)
+        else: currKey = int2str(i,labelLength)
+        newMasks.update({currKey:masks[order[i][0]]})
+    return newMasks
+
+def plot_mask_borders(mask, plot_axis=None, color='#ff0000', border_width=2, **kwargs):
+    """
+    Modified from Jun Zhuang, simplified version
+
+    plot mask (ROI) borders by using pyplot.contour function. all the 0s and Nans in the input mask will be considered
+    as background, and non-zero, non-nan pixel will be considered in ROI.
+    """
+    if not plot_axis:
+        f = plt.figure()
+        plot_axis = f.add_subplot(111)
+
+    plot_mask = np.ones(mask.shape, dtype=np.uint8)
+
+    plot_mask[np.logical_or(np.isnan(mask), mask == 0)] = 0
+
+    currfig = plot_axis.contour(plot_mask, levels=[0.5], colors=color, linewidths=border_width, **kwargs)
+
+    # put y axis in decreasing order
+    y_lim = list(plot_axis.get_ylim())
+    y_lim.sort()
+    plot_axis.set_ylim(y_lim[::-1])
+
+    plot_axis.set_aspect('equal')
+
+    return currfig

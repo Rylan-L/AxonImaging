@@ -11,6 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.ndimage as ni
 import cv2
+import tifffile as tf
 
 def svd_segment(mov, std_thresh=0, min_size=8, gaussian_size=5,num_matrices=5, downsample=2, verbose=True):
     '''Segments a movie that has been converted into an array by first denoising and reconstructing the array using
@@ -44,23 +45,25 @@ def svd_segment(mov, std_thresh=0, min_size=8, gaussian_size=5,num_matrices=5, d
     #number of dimensions to plot
     num_dim = 5
     if verbose==True:
+        f = plt.figure(figsize=(15,10))
+        
         for ii in range(num_dim):
-            f = plt.figure(figsize=(15,10))
-    
+            
             ax = f.add_subplot(221)
             axis_title = 'Unitary Matrix number ' + str(ii)
             ax.set_title(axis_title)
             mask = V[ii,:].reshape(mov.shape[1],mov.shape[2])
-            plt.imshow(mask,cmap='gray',interpolation='nearest')
-            plt.colorbar()
+            #plt.imshow(mask,cmap='gray',interpolation='nearest')
+            
     
             ax = f.add_subplot(222)
             ax.plot(U[:,ii], color='black')
             axis_title = 'Unitary Matrix number ' + str(ii)
             ax.set_title(axis_title)
             
-        plt.show(ax)
         
+        f.savefig('SVD_segmentation_Matrices.png')
+        #plt.show(ax)
     # remake with a few Unitary Matrices
 
     s[num_matrices:] = 0
@@ -86,13 +89,16 @@ def svd_segment(mov, std_thresh=0, min_size=8, gaussian_size=5,num_matrices=5, d
     
     if verbose==True:
         # plot correlation map
-        f = plt.figure(figsize=(20,15))
-        ax = f.add_subplot(221)
-        plt.imshow(ROI_image, clim=(0,100))
-        plt.colorbar()
+        f_2 = plt.figure(figsize=(20,15))
+        ax = f_2.add_subplot(221)
+        #plt.imshow(ROI_image, clim=(0,100))
+       
 
-        ax = f.add_subplot(222)
-        plt.imshow(out, cmap='Greys', alpha=0.5)
+        ax = f_2.add_subplot(222)
+       
+        
+        f_2.savefig('Correlation_Map.png')
+        #plt.imshow(out, cmap='Greys', alpha=0.5)
     
     # make list of binary masks
     patches, number_patches = ni.label(out)
@@ -139,12 +145,16 @@ def svd_segment(mov, std_thresh=0, min_size=8, gaussian_size=5,num_matrices=5, d
    
     if verbose==True:
         #plot ROIS on mean projection
-        f2 = plt.figure(figsize=(15,15))
+        f_3 = plt.figure(figsize=(15,15))
     
-        ax1 = f2.add_subplot(223)
+        ax1 = f_3.add_subplot(223)
         
         ax1.set_title(axis_title)
-        ax1.imshow(mean_mov_org, cmap='gray', clim=(0,np.max(mean_mov_org)/4))
+        
+        #f_3.savefig('Mean_mov_with_ROIs.png')
+        
+        tf.imsave('Mean_Movie_T_projection.tif',mean_mov_org.astype(np.int16))
+
 
         for mask in mask_array:
             plotting_mask = np.ones(mask.shape, dtype=np.uint8)
@@ -160,9 +170,9 @@ def svd_segment(mov, std_thresh=0, min_size=8, gaussian_size=5,num_matrices=5, d
 
             ax1.set_aspect('equal')
             ax1.set_axis_off()
+        f_3.savefig('Final_Masks.png')
             
-         
-          
+               
         
     #return mask_array as 512 x 512
     return mask_array

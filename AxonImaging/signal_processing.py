@@ -207,11 +207,17 @@ def threshold_period(signal, threshold, min_low, sample_freq, irregular_sampled_
         if duration >= min_time:
             periods.append([epoch_start[x], epoch_end[x], duration])
     
-    periods=np.array(periods)
+    if len(periods)==0:
+        print ('NO VALID PERIODS FOUND!!')
+
+        return
+
+    elif len(periods)>0:
+        periods=np.array(periods)
     
-    print ('Number of thresholded epochs found =  ' + str(np.shape(periods)[0]) + '. Median length (seconds) of each epoch is ' + str(np.median(periods[:,2])))
-    #return start and end times + duration as array
-    return periods
+        print ('Number of thresholded epochs found =  ' + str(np.shape(periods)[0]) + '. Median length (seconds) of each epoch is ' + str(np.median(periods[:,2])))
+        #return start and end times + duration as array
+        return periods
     
 
 def signal_to_mean_noise (traces, sample_freq, signal_range, noise_range):
@@ -295,7 +301,8 @@ def get_STA_traces_stamps(trace, frame_ts, event_onset_times, chunk_start, chunk
                 
                 
             else:
-                print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus', chunk_end_frame_ind
+                if verbose:
+                    print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus', chunk_end_frame_ind
                 continue
     
     else:
@@ -346,7 +353,8 @@ def get_event_trig_avg_stamps(trace, time_stamps, event_onset_times, event_end_t
             traces.append(curr_trace)
             n += 1
         else:
-            print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus', end_frame_ind
+            if verbose:
+                print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus', end_frame_ind
             continue
     return traces
 
@@ -402,7 +410,8 @@ def get_STA_traces_samples (trace, event_onset_times, chunk_start, total_dur, sa
             n += 1
             
         else:
-            print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus'
+            if verbose:
+                print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus'
             continue
         
     return traces          
@@ -442,7 +451,8 @@ def get_event_trig_avg_samples (trace, event_onset_times, event_end_times, sampl
             traces.append(curr_trace)
             n += 1
         else:
-            print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus'
+            if verbose:
+                print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus'
             continue
 
     return traces
@@ -663,7 +673,21 @@ def stim_df_f (arr, baseline_period, frame_rate=30.):
     elif arr.ndim==1:
         f_o=np.mean(arr[0:baseline_frames-1],dtype=np.float32)
         delta_f=np.subtract(arr,f_o,dtype=np.float32)
-        df_f=np.true_divide(delta_f,f_o)
+
+        
+        if f_o!=0.0:
+            df_f=np.true_divide(delta_f,f_o)
+
+        elif f_o==0.0:
+
+            print('Warning: Normalizing to zero !! Array is being returned as baseline subtracted, without normaliz')
+            df_f=delta_f
+
+
+
+    else:
+        print ('Error: Empty array passed. No baseline normalization performed. Returning original array')
+        df_f=arr
     
     return df_f
 
@@ -688,10 +712,16 @@ def batch_stimulus_traces(signals, onsets, pre_gap,stim_dur,post_gap,df_f=False)
     for keys in signals:
         #check to see if the second element is a int or float. If so, a sampling frequency has been provided and the signal can
         #be assumed to be continous (no-timestamps, analog)
+
+        print ('now processing ' + str(keys)+ ' signal.....')
+
         if isinstance(signals[keys][1], float) or isinstance(signals[keys][1], int) :
             trace=get_STA_traces_samples(signals[keys][0],event_onset_times=onsets,sample_freq=signals[keys][1],
                                             chunk_start=pre_gap,total_dur=total_time,verbose=False)
-            time=np.linspace(start=0,stop=np.mean(trace,axis=0).size/signals[keys][1],num=np.mean(trace,axis=0).size)
+            
+            
+
+            time=np.linspace(start=0,stop=np.nanmean(trace,axis=0).size/signals[keys][1],num=np.nanmean(trace,axis=0).size)
             stimulus_traces[keys] = (time,trace)
             
         #if the second tuple element is a list or an array, then assume timestamps have been provided and that it is a digital
@@ -707,23 +737,35 @@ def batch_stimulus_traces(signals, onsets, pre_gap,stim_dur,post_gap,df_f=False)
                                                                 event_onset_times=onsets, 
                                                                 chunk_start=pre_gap, 
                                                                 chunk_dur=total_time,dff=df_f, verbose=False))
-        
+
                 time=np.linspace(start=0,stop=np.nanmean(np.nanmean(stim_traces,axis=0),axis=0).size/sample_dur,
                                  num=np.nanmean(np.nanmean(stim_traces,axis=0),axis=0).size)
             
                 stimulus_traces[keys] = (time,stim_traces)
-                
+            
+            #if not a multidimensional array, just process as single dimension outside a loop    
             else:
             
                 trace=get_STA_traces_stamps(signals[keys][0],frame_ts=signals[keys][1], event_onset_times=onsets,
                                            chunk_start=pre_gap, chunk_dur=total_time,dff=False, verbose=False)
                 
-                sample_dur=1/np.mean(np.diff(signals[keys][1]))
-                time=np.linspace(start=0,stop=np.nanmean(trace,axis=0).size/sample_dur,num=np.nanmean(trace,axis=0).size)
+                sample_dur=1./np.mean(np.diff(signals[keys][1]))
+               
+                #check for atypical case where the STA trace returns only a single instance
+                if trace.ndim>1:
+                    time=np.linspace(start=0,stop=np.nanmean(trace,axis=0).size/sample_dur,num=np.nanmean(trace,axis=0).size)
+
+                elif trace.ndim==1:
+                    time=np.linspace(start=0,stop=(trace.size/sample_dur), num=trace.size)
+
+
+
+
+                
                 stimulus_traces[keys] = (time,trace)
             
         else:
-            print ('invalid data types provided. Please input a dictionary containing tuples')
+            print ('Invalid data types provided. Please input a dictionary containing tuples')
             break
             return
     #return a dictionary with keys as the signal names, and the values are tuples of the format (corresponding time_array, stim_trace)

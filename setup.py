@@ -12,7 +12,7 @@ setup(
     version='0.1.0',
     author='Rylan Larsen',
     author_email='jrh@example.com',
-    packages=['axonimaging'],
+    packages=['AxonImaging'],
     scripts=['Sample Scripts/Caiman_MotionCorrect_file_list.py','Segment_Movie_Return_Masks_and_Traces.py'],
     url='https://github.com/Rylan-L/AxonImaging',
     license='LICENSE',

@@ -4,6 +4,8 @@ import tifffile as tf
 import os
 import scipy.ndimage as ni
 import matplotlib.pyplot as plt
+from skimage.measure import label as sk_label
+from skimage.measure import regionprops
 
 
 def split_bin(arr,downsample=0.5,split=True):
@@ -397,3 +399,47 @@ def plot_mask_borders(mask, plot_axis=None, color='#ff0000', border_width=2, **k
     plot_axis.set_aspect('equal')
 
     return currfig
+
+
+def full_file_path(directory, file_type='.tif',prefix='', exclusion='Null'):
+    """Returns a list of files (the full path) in a directory that contain the characters in "prefix" with the given extension, while excluding files containing the "exclusion" characters"""
+
+    file_ext_length=len(file_type)
+    for dirpath,_,filenames in os.walk(directory):
+      return [os.path.abspath(os.path.join(dirpath, filename)) for filename in filenames if prefix in filename and exclusion not in filename and filename[-file_ext_length:] == file_type ]
+
+def avi_from_mov(mov,output_name='movie.avi', codec='XVID', normalize_histogram=False, FR=30.) :
+
+    mov=mov.astype(np.float32)    
+    
+    writer = cv2.VideoWriter(output_name, cv2.VideoWriter_fourcc(*"ffds"), FR, (512, 512), False)
+    
+    mov=(mov - np.amin(mov)) / (((np.amax(mov) - np.amin(mov))))
+    
+    
+    mov=(mov*255).astype(np.uint8)
+    
+    for xx in range(np.shape(mov)[0]):
+
+        if normalize_histogram:
+            #writer.write(cv2.equalizeHist(mov[xx,:,:]))
+
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            cl1 = clahe.apply(mov[xx,:,:])
+
+            writer.write(cl1)
+        else:
+            writer.write(mov[xx,:,:])     
+     
+    writer.release()
+ 
+    print ('AVI movie Successfully Created')
+
+def measure_eccentricity(roi):
+    #measure the eccentricity of a binary ROI
+   
+    roi[roi > 0] = 1
+    labeled_roi=sk_label(roi)
+    regions = regionprops(labeled_roi)
+
+    return regions[0]['eccentricity']

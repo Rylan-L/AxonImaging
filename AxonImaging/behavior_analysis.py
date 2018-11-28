@@ -1,6 +1,7 @@
 #Author: Rylan Larsen
 
 import numpy as np
+from axonimaging.signal_processing import stim_df_f, significant_response
 
 
 def threshold_greater(data, threshold=0):
@@ -244,7 +245,11 @@ def threshold_period(signal, threshold, min_low, sample_freq, irregular_sampled_
     
     periods=np.array(periods)
     
-    print ('Number of thresholded epochs found =  ' + str(np.shape(periods)[0]) + '. Median length (seconds) of each epoch is ' + str(np.median(periods[:,2])))
+    if periods.size==0:
+        print (' No periods found!!!')
+    else:
+        
+        print ('Number of thresholded epochs found =  ' + str(np.shape(periods)[0]) + '. Median length (seconds) of each epoch is ' + str(np.median(periods[:,2])))
     #return start and end times + duration as array
     return periods
     
@@ -444,7 +449,7 @@ def get_STA_traces_samples (trace, event_onset_times, chunk_start, total_dur, sa
         
     return traces          
 
-def get_event_trig_avg_samples (trace, event_onset_times, event_end_times, sample_freq, time_before=1, time_after=1, verbose=True):
+def get_event_trig_avg_samples (trace, event_onset_times, event_end_times, sample_freq, time_before=2., time_after=2., dff=False,dff_baseline=0.,verbose=False):
     
     '''
     Get stimulus-triggered average(STA) trace for data where the units are not already in terms of seconds, but are in terms of continous samples (analog). (variable periods, analog)
@@ -453,64 +458,86 @@ def get_event_trig_avg_samples (trace, event_onset_times, event_end_times, sampl
         
     :param trace: full trace that you wish to parse into a stimulus-triggered average (typically fluorescence trace). In this instance, it needs to be in terms of samples 
     :param event_onset_times: the timestamps for the stimulus/event of interest. These should be in units of time.
-    :param chunk_start: chunk start relative to the stimulus/event of interest
-    :param total_dur: duration of each chunk from the beginning of chunkstart, typically abs(pre_gap_dur)+post_gap_dur+stim_dur
+    :param event_end_times: the timestamps for the end of the stimulus/event of interest. 
+    :param time_before: amount of extra time before the event onset to also extract
+    :param time_after: amount of extra time AFTER the event onset to also extract
+    :param dff: whether to return the resulting trace normalized to the time before period
+    :param dff_baseline: allows for the specification of the df_f baseline in terms of relative time of the trace. If not specified the time_before variable is used.
+
+
     :return: traces for each period in units of the orginal sample units 
     '''
-    #get the time in (in seconds) for each sample. This assume a linear spacing of samples.
+    #get the time in (in seconds) for each sample. This assume a constitent spacing of samples (i.e every 60 seconds).
     #total time (in seconds) for the trace
+    
+
+
     sample_times=np.linspace(start=0,stop=trace.size/sample_freq,num=trace.size)
     
     traces = []
     n = 0
 
-    for x in range(len(event_onset_times)):
+    if dff_baseline==0.:
+        dff_baseline=time_before
+
+    #check to see if there is multiple onset times (list) or if its a single instance
+
+    if type(event_onset_times)==list:
+
+        for x in range(len(event_onset_times)):
         
-        #find the nearest analog sample to the event onset times
-        start_trace=np.argmin(np.abs(sample_times-(event_onset_times[x]-time_before)))
-        end_trace=np.argmin(np.abs(sample_times-(event_end_times[x]+time_after)))
-               
+            #find the nearest analog sample to the event onset times
+            start_trace=np.argmin(np.abs(sample_times-(event_onset_times[x]-abs(time_before))))
+            end_trace=np.argmin(np.abs(sample_times-(event_end_times[x]+time_after)))
+                   
+            if verbose:
+                print 'Period:',int(n),' Starting frame index:',start_trace,'; Ending frame index', end_trace
+            
+            if end_trace <= trace.shape[0]:
+
+                if dff==True:
+
+                    curr_trace=stim_df_f(arr=trace[start_trace:end_trace].astype(np.float32),baseline_period=dff_baseline,frame_rate=30.0)
+                
+                elif dff==False:
+                    curr_trace = trace[start_trace:end_trace].astype(np.float32)
+                
+                traces.append(curr_trace)
+                n += 1
+            else:
+                print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus'
+                continue
+
+    #take into account times where only a single onset is passed
+    else:
+        expected_dur=(event_end_times-event_onset_times)+time_before+time_after
+        
+        start_trace=np.argmin(np.abs(sample_times-(event_onset_times-abs(time_before))))
+        end_trace=np.argmin(np.abs(sample_times-(event_end_times+time_after)))
+        
+        trace_dur=(end_trace-start_trace)/sample_freq
+        
+        if int(round(trace_dur))!=int(round(expected_dur)):
+            print ('Expected duration: ' + str(expected_dur) + ' and trace duration '+ str(trace_dur) + ' do not match ')
+        
         if verbose:
-            print 'Period:',int(n),' Starting frame index:',start_trace,'; Ending frame index', end_trace
+                print ('Only single onset/end passed: Starting frame index:' + str(start_trace) + '.  Ending frame index: ' + str(end_trace) + '. Total dur ' + str(trace_dur))
         
         if end_trace <= trace.shape[0]:
+            if dff==True:
+
+                curr_trace=stim_df_f(arr=trace[start_trace:end_trace].astype(np.float32),baseline_period=dff_baseline,frame_rate=30.0)
             
-            curr_trace = trace[start_trace:end_trace].astype(np.float32)
-            traces.append(curr_trace)
-            n += 1
+            elif dff==False:
+                curr_trace = trace[start_trace:end_trace].astype(np.float32)
         else:
             print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus'
-            continue
+
+        traces=curr_trace
 
     return traces
 
 
-def stim_df_f (arr, baseline_period, frame_rate=30):
-    '''calculates delta f/f where f0 is the baseline period preceding a stimulus
-
-    #param arr: array of raw fluorescence traces to calculate df/f from. This should already encompass the baseline period, stimulus period, and post-stimulus period.
-    #param baseline_period: amount of time, in seconds, to use for the baseline period
-    #param frame_rate: imaging frame rate, default=30. This is used in determining the number of frames to extract for the baseline period.'''
-    arr=np.asarray(arr)
-    baseline_frames=int(baseline_period*frame_rate)
-   
-    
-    if arr.ndim>1:
-        df_fs=[]
-
-        for xx in range(np.shape(arr)[0]):
-            f_o=np.mean(arr[xx][0:baseline_frames-1])
-            delta_f=arr[xx]-f_o
-            df_f=delta_f/f_o
-            df_fs.append(df_f)
-        return np.array(df_fs)
-    
-    else:
-        f_o=np.mean(arr[0:baseline_frames-1])
-        delta_f=arr-f_o
-        df_f=delta_f/f_o
-    
-        return df_f
     
     
 
@@ -793,3 +820,258 @@ def downsample_TS_by_target_TS(signal, signal_ts, target_ts, time_around=0.0,ver
         ds_sig.append(avged_sample)
         
     return np.array(ds_sig)
+
+
+
+def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t, 
+                        before, after, baseline,
+                        sample_t_after_thresh,sample_dur_after_thresh,
+                        other_signals=[], override_ends=False, sample_freq=30. ):
+    
+    """
+    :param paths: path to HDF5 files
+    :param data_key: key for the HDF5 to access the data type of interest
+    
+    ---Thresholding parameters
+    
+    :param thresh_signal: the signal to threshold on
+    :param thresh: the threshold
+    :param min_l: the minimum amount of time the signal must go below the threshold to end a period
+    :param min_t: minimum time for a threshold period
+    
+    ---trace extraction parameters
+    
+    :param before: amount of time before the threshold time to extract
+    :param after: amount of time after the threshold time to extract
+    :param baseline: how many seconds in the the 'before' period to calculate baseline periods from (used in DF/F calculations and others)
+    :param sample_t_after_thresh: when sampling the "response" start this far after the threshold crossing (0 = at the threshold). Set to string 'half' to sample 50% through the epoch's duration.
+    :param sample_dur_after_thresh:when sampling the "response" start from sample_t_after_thresh and go this many seconds ahead
+    
+    """
+    import os
+    import h5py
+    import pandas as pd
+    
+    #create dataframe of all ROI responses for every running epoch
+
+    total_roi_counter=0
+    responses=[]
+    meaned_responses=[]
+
+    for path in paths:
+        mouse_id=os.path.basename(path)[0:7]
+        print ('processing ' + str(mouse_id))
+    
+        data_f=h5py.File(path,'r')
+        data=data_f.get(data_key)
+    
+        runs=threshold_period(signal=data[thresh_signal], threshold=thresh,
+                                      min_low=min_l, sample_freq=30., min_time=min_t)
+        
+        if runs.size==0:
+            print (' No periods found for id '+ str(mouse_id))
+            continue
+        
+        
+        starts=runs[:,0]
+    
+    
+        if override_ends==False or override_ends=='starts':
+            ends=runs[:,1]
+            durs=runs[:,2]
+    
+        elif isinstance(override_ends, (int, long, float)):
+           #if a number is passed to override the ends, determine the end of the periods by adding this number to the beginning
+           print ('Overiding detected durations and using USER-DEFINED durations')
+           ends=starts+override_ends
+           durs=ends-starts
+    
+        #calculate the stimulus evoked dff for each roi
+        for roi in range(len(data['axon_traces'])):
+        
+            mean_onset_list=[]
+            mean_end_list=[]
+            mean_speed_list=[]
+            mean_delta_speed_list=[]
+            
+            #create a list to store the first portion of each trace to determine if there is a significant response
+            traces_onset=[]
+            
+        
+            for xx in range(len(starts)):
+                
+                
+                if override_ends=='starts': 
+                    runnings=get_event_trig_avg_samples(data[thresh_signal],event_onset_times=ends[xx], event_end_times=ends[xx]+1,
+                                                        sample_freq=sample_freq,time_before=before, time_after=after, verbose=False)
+                
+                else:     
+                #get the signal trace that was thresholded
+                    runnings=get_event_trig_avg_samples(data[thresh_signal],event_onset_times=starts[xx],
+                              event_end_times=ends[xx],
+                              sample_freq=sample_freq,
+                              time_before=before, 
+                              time_after=after, verbose=False)
+                
+ 
+                if sample_t_after_thresh=='half':
+                    sample_t_thresh=durs[xx]/2.
+                else:
+                    sample_t_thresh=sample_t_after_thresh
+                
+            
+                frames_for_avg=int(sample_dur_after_thresh*sample_freq)
+                #get frames that are in the middle of the "epech/stimulus period"
+                start_frames=int((before*sample_freq)+(sample_t_thresh*sample_freq))
+            
+                #get any other signals the user may want
+                others=[]
+                others_means=[]
+                
+                for extras in other_signals:
+                    #get the associated running trace
+                    sig=get_event_trig_avg_samples(data[extras],event_onset_times=starts[xx],
+                              event_end_times=ends[xx],
+                              sample_freq=sample_freq,
+                              time_before=before, 
+                              time_after=after, verbose=False)
+                    
+                    baseline_sig=np.mean(sig[0:int((baseline*sample_freq))],axis=0)
+                    mean_sig=np.mean(sig[start_frames:start_frames+frames_for_avg],axis=0)
+                    #calculate in terms of percent change of baseline
+                    delta_sig=(mean_sig-baseline_sig)/baseline_sig*100
+                    
+                    onset_sig=sig[int(before*sample_freq)+1]
+                
+                    others.append(sig)
+                    others_means.append([baseline_sig, onset_sig, mean_sig, delta_sig])
+           
+
+                #get mean running_speed
+
+                baseline_speed=np.nanmean(runnings[0:int((baseline*sample_freq))],axis=0)
+                mean_speed=np.nanmean(runnings[start_frames:start_frames+frames_for_avg],axis=0)
+                delta_speed=mean_speed-baseline_speed
+   
+                #produce an array that is composed of each ROI's DF/F epeoch
+                axon_responses=get_event_trig_avg_samples(data['axon_traces'][roi],event_onset_times=starts[xx],
+                              event_end_times=ends[xx],
+                              sample_freq=sample_freq,
+                              time_before=before, 
+                              time_after=after, dff=True,dff_baseline=baseline, verbose=False)
+                
+                #check to make sure expected durations match returned trace durations
+                expected_dur=((ends[xx]-starts[xx])+before+after)
+                trace_dur_run=int(round(len(runnings)/30.))
+                trace_dur_axon=int(round(len(axon_responses)/30.))
+                
+                
+                              
+                
+                if ((trace_dur_run!=int(round(expected_dur))) or (trace_dur_axon!= int(round(expected_dur))) ) :
+                    print ('Epoch length mismatch warning: Expected duration: ' + str(int(expected_dur)) + ' and trace duration '+ str(int(trace_dur_run)) + ' do not match ')
+                    print ('skipping event/epoch')
+                    continue
+                
+                
+                end_of_eval_period_for_sig= int(round(((before+min_t)*sample_freq)))
+                traces_onset.append(axon_responses[0: end_of_eval_period_for_sig])
+                
+                
+                #get the DF at the threshold crossing
+                onset_df=axon_responses[int(before*sample_freq)+1]
+                #end_index=int(ends[xx]*sample_freq)
+                
+                
+                end_index=int((before*sample_freq)+(durs[xx]*sample_freq)-1)
+                end_df=axon_responses[end_index]
+
+        
+                mean_df=np.mean(axon_responses[start_frames:start_frames+frames_for_avg],axis=0)
+    
+                #append to list: roi number, mouse_id, epoch number,
+                #start_time, end_time, duration, axon response array (DF),
+                #mean df_f responses at user-define time, running array, mean_speed
+                sublist=[total_roi_counter,mouse_id,xx, starts[xx],ends[xx],durs[xx],
+                         axon_responses, onset_df, mean_df,end_df,
+                         runnings,mean_speed,delta_speed]
+                
+                for yy in range(len(others)):
+                    sublist.append(others[yy])
+                    #baseline_sig
+                    sublist.append(others_means[yy][0])
+                    #peak_sig
+                    sublist.append(others_means[yy][1])
+                    #mean_sig
+                    sublist.append(others_means[yy][2])
+                    #delta_sig
+                    sublist.append(others_means[yy][2])
+                
+                responses.append(sublist)
+
+                mean_onset_list.append(onset_df)
+                mean_end_list.append(end_df)
+                mean_speed_list.append(mean_speed)
+                mean_delta_speed_list.append(delta_speed)
+                
+            #get the mean trace from the onset and beginning of thresholded region
+            mean_onset_trace=np.mean(traces_onset,axis=0)
+            #determine if the average response for the ROI is significant
+            pvalue=significant_response(mean_onset_trace, base_period=(0, baseline), stim_period=(before, end_of_eval_period_for_sig), sample_freq=30.)    
+            if pvalue < 0.05:
+                significant=True
+            else:
+                significant=False
+            
+      
+            mean_onset_df_roi=np.mean(np.asarray(mean_onset_list),axis=0)
+            mean_end_df_roi=np.mean(np.asarray(mean_end_list), axis=0)
+            mean_speed_roi=np.mean(np.asarray(mean_speed_list),axis=0)
+            mean_delta_speed_roi=np.mean(np.asarray(mean_delta_speed_list),axis=0)
+        
+            meaned_responses.append([total_roi_counter, mouse_id,pvalue,significant, mean_onset_df_roi,mean_end_df_roi,
+                                 mean_speed_roi,mean_delta_speed_roi])
+    
+            total_roi_counter+=1
+        
+    column_names=['roi number','mouse_ID', 'epoch number', 'start time', 'end time', 'duration',
+                                   'axon trace', 'onset df', 'peak df', 'end df',
+                                   'threshold signal trace', 'peak thresh value', 'delta of thresh trace']
+    for names in other_signals:
+        column_names.append(names)
+        column_names.append(str(names) + ' baseline sig')
+        column_names.append(str(names) + ' onset sig')
+        column_names.append(str(names) + ' peak sig')
+        column_names.append(str(names) + ' delta % sig')
+        
+        
+
+        
+    df=pd.DataFrame(responses,columns=column_names)
+    
+    df_mean=pd.DataFrame(meaned_responses,columns=['roi number','mouse_ID','p value', 'significant mean resp', 'mean onset df', 'mean end df',
+                                               'mean thresh signal', 'mean delta thresh signal'])
+
+    #add whether the mean response is significant to the df mean
+    
+    mean_sigs=[]
+    for index, row in df.iterrows():
+        roi_num=df['roi number'][index]
+    
+        #get whether it is significant on average
+        mean_p=float(df_mean.loc[(df_mean['roi number']==roi_num)]['p value'])
+    
+        if mean_p < 0.05:
+            significant=True
+        else:
+            significant=False
+        
+        mean_sigs.append([mean_p, bool(significant)])
+
+    df_sig_responses=pd.DataFrame(mean_sigs, columns=['mean p value', 'mean sig'])
+
+    df=pd.concat([df,df_sig_responses], axis=1)
+        
+        
+    
+    return df,df_mean

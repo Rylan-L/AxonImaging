@@ -63,7 +63,12 @@ def get_auditory_onset_times(microphone, sample_freq, threshold=1, stdev_samples
         stdev.append(np.std(chunk))
 
     
-    stdev_filtered=convolve(stdev, boxcar(M=filter_width))
+    if filter_width>0:
+        stdev_filtered=convolve(stdev, boxcar(M=filter_width))
+
+    else:
+        print('using un-filtered stdev of signal')
+        stdev_filtered=stdev
 
     #get the up samples #s through thresholding
     stamps=threshold_greater(np.array(stdev_filtered),threshold)

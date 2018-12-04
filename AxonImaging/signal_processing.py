@@ -730,7 +730,7 @@ def norm_percentile (traces, percentile=10,return_percent=False):
 
 
 
-def stim_df_f (arr, baseline_period, frame_rate=30., verbose=True):
+def stim_df_f (arr, baseline_period, frame_rate=30., verbose=False):
     '''calculates delta f/f where f0 is the baseline period preceding a stimulus
 
     #param arr: array of raw fluorescence traces to calculate df/f from. This should already encompass the baseline period, stimulus period, and post-stimulus period.

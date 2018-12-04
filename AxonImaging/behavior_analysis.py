@@ -1,7 +1,7 @@
 #Author: Rylan Larsen
 
 import numpy as np
-from axonimaging.signal_processing import stim_df_f, significant_response
+from axonimaging.signal_processing import stim_df_f, significant_response,butter_lowpass_filter
 
 
 def threshold_greater(data, threshold=0):
@@ -108,7 +108,8 @@ def get_processed_running_speed (vsig,vref,sample_freq, smooth_filter_sigma = 0.
 
     return speed_smooth
 
-def threshold_period(signal, threshold, min_low, sample_freq, irregular_sampled_ts=np.array([]),pre_thresh_time=False,low_threshold=False,min_time=0.01, trace_end=994.0, exclusion_signal=np.array([]), exclusion_thresh=0, exclusion_sf=0):
+def threshold_period(signal, threshold, min_low, sample_freq=30.0, irregular_sampled_ts=np.array([]),pre_thresh_time=False,low_threshold=False,min_time=0.01, trace_end=994.0, 
+                     exclusion_signal=np.array([]), exclusion_thresh=0, exclusion_dur=False, exclusion_sf=30.):
     '''Defines onset times for when a signal crosses a threshold value for an EXTENDED period of time.
     The period of time for the period is defined by min_low, which specifies the minimum amount of time the signal must
     fall below the previously defined threshold to end the period. 
@@ -190,8 +191,23 @@ def threshold_period(signal, threshold, min_low, sample_freq, irregular_sampled_
     else:
         for ii in range(len(t_up_conv)-1):
             exclusion_up_t=t_up_conv[ii] * exclusion_sf
-            exclusion_d_t=t_down_conv[[ii]]* exclusion_sf
-            if  np.mean(exclusion_signal[int(exclusion_up_t):int(exclusion_d_t)],axis=0)<exclusion_thresh:
+            if exclusion_dur==False:
+                exclusion_d_t=t_down_conv[[ii]]* exclusion_sf
+            
+            elif isinstance(exclusion_dur, (int, long, float)):
+                exclusion_d_t=exclusion_up_t+exclusion_dur
+                
+            elif isinstance(exclusion_dur, (tuple)):
+                    #for the end of the exclusion period make it so many seconds after the onset
+                    exclusion_d_t=exclusion_up_t+exclusion_dur[1]
+                    #then override the onset and make it before or after if a tuple is passed
+                    exclusion_up_t=(t_up_conv[ii]+exclusion_dur[0]) * exclusion_sf
+                   
+            exclusion_mean=np.nanmean(exclusion_signal[int(exclusion_up_t):int(exclusion_d_t)],axis=0)
+            
+            
+            
+            if  exclusion_mean<exclusion_thresh:
                   threshed_epochs_u.append(t_up_conv[ii])  
                   threshed_epochs_d.append(t_down_conv[ii])
                   
@@ -518,16 +534,19 @@ def get_event_trig_avg_samples (trace, event_onset_times, event_end_times, sampl
         trace_dur=(end_trace-start_trace)/sample_freq
         
         if int(round(trace_dur))!=int(round(expected_dur)):
-            print ('Expected duration: ' + str(expected_dur) + ' and trace duration '+ str(trace_dur) + ' do not match ')
+            if verbose:
+                print ('Expected duration: ' + str(expected_dur) + ' and trace duration '+ str(trace_dur) + ' do not match ')
         
         if verbose:
                 print ('Only single onset/end passed: Starting frame index:' + str(start_trace) + '.  Ending frame index: ' + str(end_trace) + '. Total dur ' + str(trace_dur))
         
         if end_trace <= trace.shape[0]:
             if dff==True:
-
+                if verbose:
+                    print ('Calculating DF/F from ')
+                    print (dff_baseline)
                 curr_trace=stim_df_f(arr=trace[start_trace:end_trace].astype(np.float32),baseline_period=dff_baseline,frame_rate=30.0)
-            
+
             elif dff==False:
                 curr_trace = trace[start_trace:end_trace].astype(np.float32)
         else:
@@ -826,7 +845,8 @@ def downsample_TS_by_target_TS(signal, signal_ts, target_ts, time_around=0.0,ver
 def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t, 
                         before, after, baseline,
                         sample_t_after_thresh,sample_dur_after_thresh,
-                        other_signals=[], override_ends=False, sample_freq=30. ):
+                        other_signals=[],dff_baseline_dur=1., exclusion_sig='null',exclusion_thresh=0.,exclusion_dur=0.,
+                        override_ends=False, use_per_thresh=False, sample_freq=30. ):
     
     """
     :param paths: path to HDF5 files
@@ -844,6 +864,7 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
     :param before: amount of time before the threshold time to extract
     :param after: amount of time after the threshold time to extract
     :param baseline: how many seconds in the the 'before' period to calculate baseline periods from (used in DF/F calculations and others)
+    :param baseline
     :param sample_t_after_thresh: when sampling the "response" start this far after the threshold crossing (0 = at the threshold). Set to string 'half' to sample 50% through the epoch's duration.
     :param sample_dur_after_thresh:when sampling the "response" start from sample_t_after_thresh and go this many seconds ahead
     
@@ -860,14 +881,30 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
 
     for path in paths:
         mouse_id=os.path.basename(path)[0:7]
-        print ('processing ' + str(mouse_id))
+        print ('\n processing ' + str(mouse_id))
     
         data_f=h5py.File(path,'r')
         data=data_f.get(data_key)
-    
-        runs=threshold_period(signal=data[thresh_signal], threshold=thresh,
-                                      min_low=min_l, sample_freq=30., min_time=min_t)
         
+        if use_per_thresh==True:
+            #first lowpass filter and calculate the median of the trace
+            median=np.nanmedian(butter_lowpass_filter(data[thresh_signal], cutoff=1., analog=True))
+            threshold_per=median+(thresh*median)
+            thresh=threshold_per
+            
+        if exclusion_sig=='null':
+            runs=threshold_period(signal=data[thresh_signal], threshold=thresh,
+                                  min_low=min_l, sample_freq=30., min_time=min_t)
+            
+        else:
+            print ('Only finding epochs where the '+ str(exclusion_sig) + ' is less than '+ str(exclusion_thresh))
+            
+            runs=threshold_period(signal=data[thresh_signal], threshold=thresh,
+                                  min_low=min_l, sample_freq=30., min_time=min_t,exclusion_signal=data[exclusion_sig],
+                                  exclusion_dur=exclusion_dur,
+                                  exclusion_thresh=exclusion_thresh)
+
+        #check if no threshold crossing are found. If so, go to next file
         if runs.size==0:
             print (' No periods found for id '+ str(mouse_id))
             continue
@@ -886,6 +923,7 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
            ends=starts+override_ends
            durs=ends-starts
     
+        error_counter=0
         #calculate the stimulus evoked dff for each roi
         for roi in range(len(data['axon_traces'])):
         
@@ -896,6 +934,13 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
             
             #create a list to store the first portion of each trace to determine if there is a significant response
             traces_onset=[]
+            
+            #determine unique ids for each roi and calculate area 
+            
+            roi_unique_id=mouse_id[-6::]+'_'+ str(0)+str(roi)
+            mask=data_f['masks']['axon_masks'][roi]
+            pixels=np.where(np.logical_and(mask!=0, ~np.isnan(mask)))
+            roi_area=np.shape(pixels)[0]*np.shape(pixels)[1]
             
         
             for xx in range(len(starts)):
@@ -924,6 +969,43 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
                 #get frames that are in the middle of the "epech/stimulus period"
                 start_frames=int((before*sample_freq)+(sample_t_thresh*sample_freq))
             
+
+          
+                #get mean running_speed
+
+                baseline_speed=np.nanmean(runnings[0:int((baseline*sample_freq))],axis=0)
+                mean_speed=np.mean(runnings[start_frames:start_frames+frames_for_avg],axis=0)
+                delta_speed=mean_speed-baseline_speed
+   
+                #produce an array that is composed of each ROI's DF/F epeoch
+                axon_responses=get_event_trig_avg_samples(data['axon_traces'][roi],event_onset_times=starts[xx],
+                              event_end_times=ends[xx],
+                              sample_freq=sample_freq,
+                              time_before=before, 
+                              time_after=after, dff=True,dff_baseline=(baseline, (baseline+dff_baseline_dur)), verbose=False)
+                
+                #check to make sure expected durations match returned trace durations
+                expected_dur=((ends[xx]-starts[xx])+before+after)
+                trace_dur_run=int(round(len(runnings)/30.))
+                trace_dur_axon=int(round(len(axon_responses)/30.))
+ 
+                
+                dur_check=int( round( (ends[xx]-starts[xx]+before+after)*30.))
+                if len(axon_responses)!=dur_check:
+                    if error_counter==0:
+                        print ('Epoch # ' + str(xx) + ' Trace durations do not match expected duration: Likely due to not enough samples to grab. Skipping')
+                        error_counter+=1
+                    continue
+                
+                
+                if ((trace_dur_run!=int(round(expected_dur))) or (trace_dur_axon!= int(round(expected_dur))) ) :
+                    if error_counter==0:
+                        
+                        print ('Epoch # ' + str(xx) +'. Epoch length mismatch warning: Expected duration: ' + str(int(expected_dur)) + ' and trace duration '+ str(int(trace_dur_run)) + ' do not match ')
+                        print ('skipping event/epoch')
+                        error_counter+=1
+                    continue
+                
                 #get any other signals the user may want
                 others=[]
                 others_means=[]
@@ -945,37 +1027,13 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
                 
                     others.append(sig)
                     others_means.append([baseline_sig, onset_sig, mean_sig, delta_sig])
-           
-
-                #get mean running_speed
-
-                baseline_speed=np.nanmean(runnings[0:int((baseline*sample_freq))],axis=0)
-                mean_speed=np.nanmean(runnings[start_frames:start_frames+frames_for_avg],axis=0)
-                delta_speed=mean_speed-baseline_speed
-   
-                #produce an array that is composed of each ROI's DF/F epeoch
-                axon_responses=get_event_trig_avg_samples(data['axon_traces'][roi],event_onset_times=starts[xx],
-                              event_end_times=ends[xx],
-                              sample_freq=sample_freq,
-                              time_before=before, 
-                              time_after=after, dff=True,dff_baseline=baseline, verbose=False)
-                
-                #check to make sure expected durations match returned trace durations
-                expected_dur=((ends[xx]-starts[xx])+before+after)
-                trace_dur_run=int(round(len(runnings)/30.))
-                trace_dur_axon=int(round(len(axon_responses)/30.))
-                
-                
-                              
-                
-                if ((trace_dur_run!=int(round(expected_dur))) or (trace_dur_axon!= int(round(expected_dur))) ) :
-                    print ('Epoch length mismatch warning: Expected duration: ' + str(int(expected_dur)) + ' and trace duration '+ str(int(trace_dur_run)) + ' do not match ')
-                    print ('skipping event/epoch')
-                    continue
                 
                 
                 end_of_eval_period_for_sig= int(round(((before+min_t)*sample_freq)))
-                traces_onset.append(axon_responses[0: end_of_eval_period_for_sig])
+               
+                onset_trace=axon_responses[0: end_of_eval_period_for_sig+1]
+                
+                traces_onset.append(onset_trace)
                 
                 
                 #get the DF at the threshold crossing
@@ -992,9 +1050,9 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
                 #append to list: roi number, mouse_id, epoch number,
                 #start_time, end_time, duration, axon response array (DF),
                 #mean df_f responses at user-define time, running array, mean_speed
-                sublist=[total_roi_counter,mouse_id,xx, starts[xx],ends[xx],durs[xx],
+                sublist=[roi_unique_id,mouse_id, xx, starts[xx],ends[xx],durs[xx],
                          axon_responses, onset_df, mean_df,end_df,
-                         runnings,mean_speed,delta_speed]
+                         runnings,mean_speed,delta_speed,roi_area,total_roi_counter]
                 
                 for yy in range(len(others)):
                     sublist.append(others[yy])
@@ -1029,14 +1087,14 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
             mean_speed_roi=np.mean(np.asarray(mean_speed_list),axis=0)
             mean_delta_speed_roi=np.mean(np.asarray(mean_delta_speed_list),axis=0)
         
-            meaned_responses.append([total_roi_counter, mouse_id,pvalue,significant, mean_onset_df_roi,mean_end_df_roi,
-                                 mean_speed_roi,mean_delta_speed_roi])
+            meaned_responses.append([roi_unique_id, mouse_id,pvalue,significant, mean_onset_df_roi,mean_end_df_roi,
+                                 mean_speed_roi,mean_delta_speed_roi,total_roi_counter])
     
             total_roi_counter+=1
         
-    column_names=['roi number','mouse_ID', 'epoch number', 'start time', 'end time', 'duration',
+    column_names=['roi id','mouse_ID','epoch number', 'start time', 'end time', 'duration',
                                    'axon trace', 'onset df', 'peak df', 'end df',
-                                   'threshold signal trace', 'peak thresh value', 'delta of thresh trace']
+                                   'threshold signal trace', 'peak thresh value', 'delta of thresh trace', 'ROI area','roi number']
     for names in other_signals:
         column_names.append(names)
         column_names.append(str(names) + ' baseline sig')
@@ -1049,8 +1107,8 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
         
     df=pd.DataFrame(responses,columns=column_names)
     
-    df_mean=pd.DataFrame(meaned_responses,columns=['roi number','mouse_ID','p value', 'significant mean resp', 'mean onset df', 'mean end df',
-                                               'mean thresh signal', 'mean delta thresh signal'])
+    df_mean=pd.DataFrame(meaned_responses,columns=['roi id','mouse_ID','p value', 'significant mean resp', 'mean onset df', 'mean end df',
+                                               'mean thresh signal', 'mean delta thresh signal', 'roi number'])
 
     #add whether the mean response is significant to the df mean
     
@@ -1071,6 +1129,14 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
     df_sig_responses=pd.DataFrame(mean_sigs, columns=['mean p value', 'mean sig'])
 
     df=pd.concat([df,df_sig_responses], axis=1)
+    
+    #clean up dataframes by re-indexing by the roi_ids
+    df=df.sort_values(['roi id', 'epoch number'])
+    df.reset_index(drop=True)
+    
+    df_mean=df_mean.sort_values(['roi id'])
+    df_mean.reset_index(drop=True)
+    
         
         
     

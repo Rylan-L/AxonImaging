@@ -601,13 +601,9 @@ def downsample_TS_by_target_TS(signal, signal_ts, target_ts, time_around=0.0,ver
     :return: the signal trace downsampled to the frequency of the timestamps (target_ts)
     '''
 
-    #calculate the sampling rate of the signal
-    sf=1/np.mean(np.diff(signal_ts))
     
     #get target signal average sampling frequncy
     target_sf=np.mean(np.diff(target_ts))
-    #create a time array that has each time value for the passed in signal (based on sf)    
-    times= np.linspace(start=0,stop=(signal_ts.size/sf),num=signal_ts.size)
 
     ds_sig=[]
     counter=0
@@ -620,25 +616,37 @@ def downsample_TS_by_target_TS(signal, signal_ts, target_ts, time_around=0.0,ver
         if time_around>0:
                         
             span=time_around*target_sf
+
+            if verbose:
+                print (stamp), (signal_ts[np.argmin(np.abs(signal_ts-stamp))]), (signal_ts[np.argmin(np.abs(signal_ts-stamp))]-stamp)
             
             ahead=(stamp+span)
                         
             behind=(stamp-span)
+            
+            
+            ind_ahead=np.argmin(np.abs(signal_ts-ahead))
 
-            ind_ahead=np.argmin(np.abs(times-ahead))
-
-            ind_behind=np.argmin(np.abs(times-behind))
+            ind_behind=np.argmin(np.abs(signal_ts-behind))
+            
+            if ind_ahead-ind_behind>0:
         
-            avged_sample=np.nanmean(signal[ind_behind:ind_ahead],axis=0)
+                avged_sample=np.nanmean(signal[ind_behind:ind_ahead],axis=0)
+            
+            else:
+                ind=np.argmin(np.abs(signal_ts-stamp))
+    
+                avged_sample=signal[ind]
                    
         else:
-            ind=np.argmin(np.abs(times-stamp))
+
+            ind=np.argmin(np.abs(signal_ts-stamp))
            
             avged_sample=signal[ind]
       
         counter+=1
        
-        if verbose==True:
+        if verbose:
             if counter%500==0 or counter==1:
                                 
                 per=int(counter/float(len(target_ts))*100)
@@ -648,6 +656,7 @@ def downsample_TS_by_target_TS(signal, signal_ts, target_ts, time_around=0.0,ver
         ds_sig.append(avged_sample)
         
     return np.array(ds_sig)
+
 
 def norm_percentile (traces, percentile=10,return_percent=False):
     '''Calculates baseline normalized, subtracted trace (DF/F) by setting the baseline (F0) to a percentile of the trace.

@@ -108,8 +108,8 @@ def get_processed_running_speed (vsig,vref,sample_freq, smooth_filter_sigma = 0.
 
     return speed_smooth
 
-def threshold_period(signal, threshold, min_low, sample_freq=30.0, irregular_sampled_ts=np.array([]),pre_thresh_time=False,low_threshold=False,min_time=0.01, trace_end=994.0, 
-                     exclusion_signal=np.array([]), exclusion_thresh=0, exclusion_dur=False, exclusion_sf=30.):
+def threshold_period(signal, threshold, min_low, sample_freq=30.0, irregular_sampled_ts=np.array([]),min_time_between=False, pre_thresh_time=False,low_threshold=False,min_time=0.01, trace_end=994.0, 
+                     exclusion_signal=np.array([]), exclusion_thresh=0, exclusion_dur=False, exclusion_sf=30., exclusion_logic='exclude'):
     '''Defines onset times for when a signal crosses a threshold value for an EXTENDED period of time.
     The period of time for the period is defined by min_low, which specifies the minimum amount of time the signal must
     fall below the previously defined threshold to end the period. 
@@ -127,6 +127,8 @@ def threshold_period(signal, threshold, min_low, sample_freq=30.0, irregular_sam
     :param min_time: minimum amount of a whole period (in time) that is allowed for inclusion (seconds). I.E. only want periods of at least x length.
     :trace_end: the end of the signal region for analysis. Typically this is the end of an imaging session and is included to avoid analyzing data where there is no corresponding images.
     
+    :param exclusion_signal: an optional, different array to use as an exclusion (or exclusive inclusive) indicator of 
+    
     
     :return list of start, end, and duration times for each period
     '''
@@ -143,7 +145,12 @@ def threshold_period(signal, threshold, min_low, sample_freq=30.0, irregular_sam
        
     else:
         downwards=last_pos_above_low_thresh(signal[:end_ind],threshold, low_threshold=low_threshold)
-    
+    #check for weird situation where the trace starts above the threshold
+    if signal[0]>=threshold:
+        print ('Warning: the first point in the trace is already above threshold. Discarding the first downcrossing.')
+        downwards=downwards[1:-1]
+        downwards=np.append(downwards, (downwards[-1]+10))
+        
     
     #check the threshold crossing to make sure an extended period of time prior to the upcrossing that the signal is below
     if pre_thresh_time!=False:
@@ -184,39 +191,62 @@ def threshold_period(signal, threshold, min_low, sample_freq=30.0, irregular_sam
     threshed_epochs_u=[]
     threshed_epochs_d=[]
     
-    
     if exclusion_signal.size==0:
         #define the orginal epochs by zipping them together into tuple
         epoch_o=zip(t_up_conv,t_down_conv)
     else:
-        for ii in range(len(t_up_conv)-1):
-            exclusion_up_t=t_up_conv[ii] * exclusion_sf
-            if exclusion_dur==False:
-                exclusion_d_t=t_down_conv[[ii]]* exclusion_sf
-            
-            elif isinstance(exclusion_dur, (int, long, float)):
-                exclusion_d_t=exclusion_up_t+exclusion_dur
-                
-            elif isinstance(exclusion_dur, (tuple)):
-                    #for the end of the exclusion period make it so many seconds after the onset
-                    exclusion_d_t=exclusion_up_t+exclusion_dur[1]
-                    #then override the onset and make it before or after if a tuple is passed
-                    exclusion_up_t=(t_up_conv[ii]+exclusion_dur[0]) * exclusion_sf
-                   
-            exclusion_mean=np.nanmean(exclusion_signal[int(exclusion_up_t):int(exclusion_d_t)],axis=0)
-            
-            
-            
-            if  exclusion_mean<exclusion_thresh:
-                  threshed_epochs_u.append(t_up_conv[ii])  
-                  threshed_epochs_d.append(t_down_conv[ii])
-                  
-        epoch_o=zip(threshed_epochs_u,threshed_epochs_d)
 
+        for ii in range(len(t_up_conv)-1):
+            
+            
+            #convert the valid upcrossing time to the units of the exclusion signal
+            #note t_up_conv[ii] is in seconds, get exclusion 
+            
+            if isinstance(exclusion_dur, (tuple)):
+                #subtract the first tuple value from the up time to get the beginning. Multiple by the sampling frequency to get in terms of indices of the array
+                exclude_start=int(round((t_up_conv[ii]-exclusion_dur[0])*exclusion_sf))
+                
+                #add the second tuple value from the up time to get the end
+                exclude_end=int(round((t_up_conv[ii]+exclusion_dur[1] )*exclusion_sf))     
+                
+                
+                if exclude_start<1:
+                    print ('There are not enough time points at the beginning of the exclusion trace to calculate the specified exclusion_dur beginning. Setting the start equal to the first time point')
+                    exclude_start=1
+                if exclude_end > np.shape(exclusion_signal)[0]:
+                    print ('There are not enough time points at the End of the exclusion trace to calculate the specified exclusion_dur ending. Setting the ending equal to the last time point')
+                    exclude_end=np.shape(exclusion_signal)[0]
+                    
+
+            elif isinstance(exclusion_dur, (int, long, float)):
+                print ('only single duration timepoint passed. Assuming this timepoint refers to a period prior to the onset of the threshold crossing (start= passed exclusion_dur, end=start of epoch) ')
+                exclude_start=int(round((t_up_conv[ii]-exclusion_dur)*exclusion_sf))
+                exclude_end=t_up_conv[ii]*exclusion_sf
+                
+            else:
+                raise Exception ('Error: exclusion signal is passed in but no associated duration(s)')
+            
+            exclusion_trace=exclusion_signal[exclude_start:exclude_end]
+    
+            
+            #determine if there are any upwards threshold crossing in the trace.
+            exclusion_ts_above=last_pos_below_thresh(exclusion_trace,threshold=exclusion_thresh)
+            
+            #to account for cases where the exclusion trace starts in an "UP"-threshold state, look for downward going events
+            exclusion_ts_below=last_pos_above_low_thresh(exclusion_trace,threshold=exclusion_thresh,low_threshold=False)
+            
+            if  exclusion_logic=='exclude' and (exclusion_ts_above.size==0) and (exclusion_ts_below.size==0):
+                threshed_epochs_u.append(t_up_conv[ii])  
+                threshed_epochs_d.append(t_down_conv[ii])
+            
+            elif exclusion_logic=='include' and exclusion_ts_above.size>0 :
+                threshed_epochs_u.append(t_up_conv[ii])  
+                threshed_epochs_d.append(t_down_conv[ii])
+
+        epoch_o=zip(threshed_epochs_u,threshed_epochs_d)
         
     #to handle the last instance, append a very large value beyond where data was acquired
     epoch_o.append([trace_end+5,(trace_end+5.01)])
-    
         
     epoch_start=[]
     epoch_end=[]
@@ -251,13 +281,27 @@ def threshold_period(signal, threshold, min_low, sample_freq=30.0, irregular_sam
         else:
             print ('error: could not be calculated')
 
-    #measure duration of each period
+    #measure duration of each period, exclude durations shorter than teh minimum time
     periods=[]
     for x in range(len(epoch_start)):
         
         duration=epoch_end[x]-epoch_start[x]
         if duration >= min_time:
-            periods.append([epoch_start[x], epoch_end[x], duration])
+            if isinstance(min_time_between, (int, long, float)) and min_time_between!=0.:
+                #dtermine the time between this start period and the next
+                if (x+1) >= len(epoch_start):
+                    continue
+                else:
+                    time_between_next=epoch_start[x+1]-epoch_start[x]
+                    if time_between_next>=min_time_between:
+                            periods.append([epoch_start[x], epoch_end[x], duration])
+                            
+            else:
+                periods.append([epoch_start[x], epoch_end[x], duration])
+            
+    
+        
+        
     
     periods=np.array(periods)
     
@@ -843,9 +887,8 @@ def downsample_TS_by_target_TS(signal, signal_ts, target_ts, time_around=0.0,ver
 
 
 def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t, 
-                        before, after, baseline,
-                        sample_t_after_thresh,sample_dur_after_thresh,
-                        other_signals=[],dff_baseline_dur=1., exclusion_sig='null',exclusion_thresh=0.,exclusion_dur=0.,
+                        before, after, baseline_period,response_period,min_time_between=False,use_dff=True,
+                        other_signals=[],dff_baseline_dur=1., exclusion_sig='null',exclusion_thresh=0.,exclusion_dur=0.,exclusion_logic='exclude',
                         override_ends=False, use_per_thresh=False, sample_freq=30. ):
     
     """
@@ -858,13 +901,14 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
     :param thresh: the threshold
     :param min_l: the minimum amount of time the signal must go below the threshold to end a period
     :param min_t: minimum time for a threshold period
+    :param min_time_between: the minimum amount that must be between the start of two epochs. Useful for finding epochs that occur in isolation from nearby other epochs.
     
     ---trace extraction parameters
     
     :param before: amount of time before the threshold time to extract
     :param after: amount of time after the threshold time to extract
     :param baseline: how many seconds in the the 'before' period to calculate baseline periods from (used in DF/F calculations and others)
-    :param baseline
+    :param baseline: where the "baseline" should be calculated from in the trace (used in DF/F calculations and others) . Tuple of start time and end time for the baseline.
     :param sample_t_after_thresh: when sampling the "response" start this far after the threshold crossing (0 = at the threshold). Set to string 'half' to sample 50% through the epoch's duration.
     :param sample_dur_after_thresh:when sampling the "response" start from sample_t_after_thresh and go this many seconds ahead
     
@@ -878,10 +922,17 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
     total_roi_counter=0
     responses=[]
     meaned_responses=[]
+    
+    #check to make sure that the baseline is specified as a tuple and deal with instances where it isn't
+    if isinstance(baseline_period, (int, long, float)):
+        print ('the baseline period was specified as a single number, not a start and end time. Assuming start time is time 0 and end time of hte baseline is what is specified.')
+        baseline_period=(0,baseline_period)
+    
+
 
     for path in paths:
         mouse_id=os.path.basename(path)[0:7]
-        print ('\n processing ' + str(mouse_id))
+        print ('\n processing ' + str(mouse_id) + '\n')
     
         data_f=h5py.File(path,'r')
         data=data_f.get(data_key)
@@ -897,11 +948,11 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
                                   min_low=min_l, sample_freq=30., min_time=min_t)
             
         else:
-            print ('Only finding epochs where the '+ str(exclusion_sig) + ' is less than '+ str(exclusion_thresh))
+            print (exclusion_logic+'  epochs where the '+ str(exclusion_sig) + ' is greater than '+ str(exclusion_thresh))
             
-            runs=threshold_period(signal=data[thresh_signal], threshold=thresh,
+            runs=threshold_period(signal=data[thresh_signal], threshold=thresh,min_time_between=min_time_between,
                                   min_low=min_l, sample_freq=30., min_time=min_t,exclusion_signal=data[exclusion_sig],
-                                  exclusion_dur=exclusion_dur,
+                                  exclusion_dur=exclusion_dur,exclusion_logic=exclusion_logic,
                                   exclusion_thresh=exclusion_thresh)
 
         #check if no threshold crossing are found. If so, go to next file
@@ -909,10 +960,9 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
             print (' No periods found for id '+ str(mouse_id))
             continue
         
-        
+        #get teh start times from teh threshold_period output
         starts=runs[:,0]
-    
-    
+        #take into account times where you want to get traces that start relative to the onset and you don't want to be concerned with their duration
         if override_ends==False or override_ends=='starts':
             ends=runs[:,1]
             durs=runs[:,2]
@@ -925,6 +975,7 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
     
         error_counter=0
         #calculate the stimulus evoked dff for each roi
+        #loop for each ROI
         for roi in range(len(data['axon_traces'])):
         
             mean_onset_list=[]
@@ -932,24 +983,23 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
             mean_speed_list=[]
             mean_delta_speed_list=[]
             
-            #create a list to store the first portion of each trace to determine if there is a significant response
+            #create a list to store the first portion of each trace where there always a epoch peroiod
             traces_onset=[]
+            #create a more inclusive list to store entire baseline, onset, and after periods for arbituarily selecting regions for analysis
+            before_after_traces=[]
             
             #determine unique ids for each roi and calculate area 
-            
             roi_unique_id=mouse_id[-6::]+'_'+ str(0)+str(roi)
             mask=data_f['masks']['axon_masks'][roi]
             pixels=np.where(np.logical_and(mask!=0, ~np.isnan(mask)))
             roi_area=np.shape(pixels)[0]*np.shape(pixels)[1]
             
-        
+            #loop for each epoch
             for xx in range(len(starts)):
-                
                 
                 if override_ends=='starts': 
                     runnings=get_event_trig_avg_samples(data[thresh_signal],event_onset_times=ends[xx], event_end_times=ends[xx]+1,
                                                         sample_freq=sample_freq,time_before=before, time_after=after, verbose=False)
-                
                 else:     
                 #get the signal trace that was thresholded
                     runnings=get_event_trig_avg_samples(data[thresh_signal],event_onset_times=starts[xx],
@@ -958,31 +1008,30 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
                               time_before=before, 
                               time_after=after, verbose=False)
                 
- 
-                if sample_t_after_thresh=='half':
-                    sample_t_thresh=durs[xx]/2.
+        
+                if response_period[1]=='half':
+                    response_period_end=durs[xx]/2.
                 else:
-                    sample_t_thresh=sample_t_after_thresh
+                    response_period_end=response_period[1]
                 
-            
-                frames_for_avg=int(sample_dur_after_thresh*sample_freq)
-                #get frames that are in the middle of the "epech/stimulus period"
-                start_frames=int((before*sample_freq)+(sample_t_thresh*sample_freq))
-            
 
-          
+                baseline_indices=(int((baseline_period[0]*sample_freq)), int((baseline_period[1]*sample_freq)))
+                
+                response_indices=(int((response_period[0]*sample_freq)), int((response_period_end*sample_freq)))
+                
+                
                 #get mean running_speed
-
-                baseline_speed=np.nanmean(runnings[0:int((baseline*sample_freq))],axis=0)
-                mean_speed=np.mean(runnings[start_frames:start_frames+frames_for_avg],axis=0)
+                baseline_speed=np.nanmean(runnings[baseline_indices[0]:baseline_indices[1]],axis=0)
+                mean_speed=np.nanmean(runnings[response_indices[0]:response_indices[1]],axis=0)
                 delta_speed=mean_speed-baseline_speed
    
                 #produce an array that is composed of each ROI's DF/F epeoch
+                
                 axon_responses=get_event_trig_avg_samples(data['axon_traces'][roi],event_onset_times=starts[xx],
                               event_end_times=ends[xx],
                               sample_freq=sample_freq,
                               time_before=before, 
-                              time_after=after, dff=True,dff_baseline=(baseline, (baseline+dff_baseline_dur)), verbose=False)
+                              time_after=after, dff=use_dff,dff_baseline=(baseline_period[0], baseline_period[1]), verbose=False)
                 
                 #check to make sure expected durations match returned trace durations
                 expected_dur=((ends[xx]-starts[xx])+before+after)
@@ -1018,8 +1067,8 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
                               time_before=before, 
                               time_after=after, verbose=False)
                     
-                    baseline_sig=np.mean(sig[0:int((baseline*sample_freq))],axis=0)
-                    mean_sig=np.mean(sig[start_frames:start_frames+frames_for_avg],axis=0)
+                    baseline_sig=np.nanmean(sig[baseline_indices[0]:baseline_indices[1]],axis=0)
+                    mean_sig=np.nanmean(sig[response_indices[0]:response_indices[1]],axis=0)
                     #calculate in terms of percent change of baseline
                     delta_sig=(mean_sig-baseline_sig)/baseline_sig*100
                     
@@ -1028,24 +1077,25 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
                     others.append(sig)
                     others_means.append([baseline_sig, onset_sig, mean_sig, delta_sig])
                 
-                
+                #calculate a trace that MUST include the region betweeen start and end. This is performed to allow for averaging of the epochs that have different durations. 
+                #it always will produce a trace that contains the MINIMAL length resonse
                 end_of_eval_period_for_sig= int(round(((before+min_t)*sample_freq)))
-               
-                onset_trace=axon_responses[0: end_of_eval_period_for_sig+1]
-                
+                onset_trace=axon_responses[0:end_of_eval_period_for_sig+1]
                 traces_onset.append(onset_trace)
-                
+                #calculate a trace that includes the baseline period, the onset, and the amount of time after. used in calculation of signficance for an ROI
+                before_after_trace=axon_responses[0:int((before+after)*sample_freq)]
+                before_after_traces.append(before_after_trace)
+               
                 
                 #get the DF at the threshold crossing
                 onset_df=axon_responses[int(before*sample_freq)+1]
                 #end_index=int(ends[xx]*sample_freq)
                 
-                
                 end_index=int((before*sample_freq)+(durs[xx]*sample_freq)-1)
                 end_df=axon_responses[end_index]
 
         
-                mean_df=np.mean(axon_responses[start_frames:start_frames+frames_for_avg],axis=0)
+                mean_df=np.nanmean(axon_responses[response_indices[0]:response_indices[1]],axis=0)
     
                 #append to list: roi number, mouse_id, epoch number,
                 #start_time, end_time, duration, axon response array (DF),
@@ -1073,22 +1123,27 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
                 mean_delta_speed_list.append(delta_speed)
                 
             #get the mean trace from the onset and beginning of thresholded region
-            mean_onset_trace=np.mean(traces_onset,axis=0)
+            mean_onset_trace=np.nanmean(traces_onset,axis=0)
             #determine if the average response for the ROI is significant
-            pvalue=significant_response(mean_onset_trace, base_period=(0, baseline), stim_period=(before, end_of_eval_period_for_sig), sample_freq=30.)    
+            
+            #12_6 change: allow significance to be calculated from arbituary regions across the entire baselein and end period, not just the consistently resposne
+            #therefore use the onset plus and minus the 
+            before_after_mean=np.nanmean(before_after_traces,axis=0)
+            
+            pvalue=significant_response(before_after_mean, base_period=(baseline_period[0],baseline_period[1]), stim_period=(response_period[0],response_period[1]), sample_freq=30.)    
             if pvalue < 0.05:
                 significant=True
             else:
                 significant=False
             
       
-            mean_onset_df_roi=np.mean(np.asarray(mean_onset_list),axis=0)
-            mean_end_df_roi=np.mean(np.asarray(mean_end_list), axis=0)
-            mean_speed_roi=np.mean(np.asarray(mean_speed_list),axis=0)
-            mean_delta_speed_roi=np.mean(np.asarray(mean_delta_speed_list),axis=0)
+            mean_onset_df_roi=np.nanmean(np.asarray(mean_onset_list),axis=0)
+            mean_end_df_roi=np.nanmean(np.asarray(mean_end_list), axis=0)
+            mean_speed_roi=np.nanmean(np.asarray(mean_speed_list),axis=0)
+            mean_delta_speed_roi=np.nanmean(np.asarray(mean_delta_speed_list),axis=0)
         
             meaned_responses.append([roi_unique_id, mouse_id,pvalue,significant, mean_onset_df_roi,mean_end_df_roi,
-                                 mean_speed_roi,mean_delta_speed_roi,total_roi_counter])
+                                 mean_speed_roi,mean_delta_speed_roi,total_roi_counter,before_after_mean,mean_onset_trace])
     
             total_roi_counter+=1
         
@@ -1108,7 +1163,7 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
     df=pd.DataFrame(responses,columns=column_names)
     
     df_mean=pd.DataFrame(meaned_responses,columns=['roi id','mouse_ID','p value', 'significant mean resp', 'mean onset df', 'mean end df',
-                                               'mean thresh signal', 'mean delta thresh signal', 'roi number'])
+                                               'mean thresh signal', 'mean delta thresh signal', 'roi number','mean trace', 'mean baseline and onset trace'])
 
     #add whether the mean response is significant to the df mean
     

@@ -401,12 +401,16 @@ def plot_mask_borders(mask, plot_axis=None, color='#ff0000', border_width=2, **k
     return currfig
 
 
-def full_file_path(directory, file_type='.tif',prefix='', exclusion='Null'):
+def full_file_path(directory, file_type='.tif',prefix='', exclusion='Null', case_insens=True):
     """Returns a list of files (the full path) in a directory that contain the characters in "prefix" with the given extension, while excluding files containing the "exclusion" characters"""
 
     file_ext_length=len(file_type)
     for dirpath,_,filenames in os.walk(directory):
-      return [os.path.abspath(os.path.join(dirpath, filename)) for filename in filenames if prefix in filename and exclusion not in filename and filename[-file_ext_length:] == file_type ]
+      if case_insens==True:
+        return [os.path.abspath(os.path.join(dirpath, filename)) for filename in filenames if prefix.lower() in filename.lower() and exclusion.lower() not in filename.lower() and filename[-file_ext_length:] == file_type ]
+      
+      elif case_insens==False:
+        return [os.path.abspath(os.path.join(dirpath, filename)) for filename in filenames if prefix in filename and exclusion not in filename and filename[-file_ext_length:] == file_type ]
 
 def avi_from_mov(mov,output_name='movie.avi', codec='XVID', normalize_histogram=False, FR=30.) :
 

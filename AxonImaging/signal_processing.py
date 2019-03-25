@@ -739,7 +739,7 @@ def norm_percentile (traces, percentile=10,return_percent=False):
 
 
 
-def stim_df_f (arr, baseline_period, frame_rate=30., verbose=False):
+def stim_df_f (arr, baseline_period, frame_rate=30., verbose=True):
     '''calculates delta f/f where f0 is the baseline period preceding a stimulus
 
     #param arr: array of raw fluorescence traces to calculate df/f from. This should already encompass the baseline period, stimulus period, and post-stimulus period.
@@ -747,40 +747,34 @@ def stim_df_f (arr, baseline_period, frame_rate=30., verbose=False):
     #param frame_rate: imaging frame rate, default=30. This is used in determining the number of frames to extract for the baseline period.'''
     arr=np.asarray(arr)
 
-    if not isinstance(baseline_period, tuple):
-        baseline_frames=int(abs(baseline_period)*frame_rate)
     
-
+    if isinstance(baseline_period, (int, long, float)):
+        baseline_frames=int(abs(baseline_period)*frame_rate)
+       
+    
 
     def check_fo(arr,fo):
     	#function to check for strange values of Fo
 
     	if fo <0.0:
             if verbose==True:
-                print ('WARNING: Mean Baseline fluorescence is negative in DF/F calculation! Currently ' + str(f_o) +'Setting fo equal to 1' )
+                print ('WARNING: Mean Baseline fluorescence is negative in DF/F calculation! Currently ' + str(f_o) +' Adding 50 to trace (typical neuropil value)' )
 
-            fo=f_o+abs(fo)+1
+            arr=arr+75.
+            fo=f_o+75.
 
             delta_f=arr-fo
             df_f=delta_f/fo
-
-            # delta_f=np.subtract(arr,f_o,dtype=np.float32)
-            # #delta_f=arr-f_o
-            # df_f=np.true_divide(delta_f,f_o)
-
+        
+        elif fo==0.0:
+            delta_f=arr-fo
+            if verbose==True:
+                print('Warning: Normalizing to zero !! Array is being returned as baseline subtracted, without normalization')
+            df_f=delta_f
         
         elif fo!=0.0:
-            # delta_f=np.subtract(arr,f_o,dtype=np.float32)
-            # df_f=np.true_divide(delta_f,f_o)
-
             delta_f=arr-fo
             df_f=delta_f/fo
-
-        elif fo==0.0:
-        	delta_f=arr-fo
-        	if verbose==True:
-        		print('Warning: Normalizing to zero !! Array is being returned as baseline subtracted, without normalization')
-        	df_f=delta_f
 
         return df_f
 
@@ -794,9 +788,10 @@ def stim_df_f (arr, baseline_period, frame_rate=30., verbose=False):
                     start_base=int(round(baseline_period[0]*frame_rate))
                     end_base=int(round(baseline_period[1]*frame_rate))
                     
-                    f_o=np.mean(arr[xx][start_base:end_base-1])
-            else:
-                f_o=np.mean(arr[xx][0:baseline_frames-1])
+                    f_o=np.mean(arr[xx][start_base:end_base])
+
+            elif isinstance(baseline_period, (int, long, float)):
+                    f_o=np.mean(arr[xx][0:baseline_frames-1])
 
             f_o=np.mean(arr[xx][0:baseline_frames-1])
 
@@ -810,10 +805,16 @@ def stim_df_f (arr, baseline_period, frame_rate=30., verbose=False):
         if isinstance(baseline_period, tuple):
             start_base=int(round(baseline_period[0]*frame_rate))
             end_base=int(round(baseline_period[1]*frame_rate))
-                    
-            f_o=np.mean(arr[start_base:end_base-1])
-        else:
+            f_o=np.mean(arr[start_base:end_base])
+
+        elif isinstance(baseline_period, (int, long, float)):
             f_o=np.mean(arr[0:baseline_frames-1])
+                    
+            
+        #check to see if fo is negative
+
+        else:
+            print ('error: baseline period is not a number')
         
         df_f=check_fo(arr=arr,fo=f_o)
 

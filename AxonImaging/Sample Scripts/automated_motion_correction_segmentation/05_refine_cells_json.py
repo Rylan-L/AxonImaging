@@ -39,7 +39,7 @@ if len(json_path)>0:
     center_margin = d['post_proc']['center_margin']
     area_range = d['post_proc']['area_range']
     
-    overlap_thresh = d['post_proc']['overlap_thresh']
+    overlap_thr = d['post_proc']['overlap_thresh']
   
 else:
     #if no json, params must be manually defined

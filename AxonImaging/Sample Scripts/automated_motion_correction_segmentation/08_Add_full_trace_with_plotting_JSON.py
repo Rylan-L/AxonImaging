@@ -42,7 +42,6 @@ if len(json_path)>0:
 
 else:
     prefix='m392927'
-    background_file_name = prefix+"Mean_All_Corrected_DS_T_projection.tif"
     #must be in correct order of acquisition!!!
     data_folders = [r"D:\2-photon data\ChAT-IRES-Cre; Ai162\181107-M392927\Auditory", 
                r"D:\2-photon data\ChAT-IRES-Cre; Ai162\181107-M392927\Spontaneous",
@@ -52,6 +51,7 @@ else:
     neuropil_sub=True
     only_filt_traces=True
 
+background_file_name = prefix+"Mean_All_Corrected_DS_T_projection.tif"
     
 save_folder = 'filtered_figures'
 roi_folder='all_rois'
@@ -62,15 +62,15 @@ masks_path=ip.full_file_path(curr_folder, file_type='.hdf5', prefix='rois_and_tr
 dfile = h5py.File(masks_path)
 
 if only_filt_traces:
-    print ('extracting traces ONLY from pre-filted masks, not original population of ROIs')
+    print ('extracting traces ONLY from pre-filtered masks, not original population of ROIs')
     num_masks=len(dfile['filt_masks'])
-    good_masks=dfile['filt_masks']
-    good_surr=dfile['filt_surr_masks']
+    good_masks=np.array(dfile['filt_masks'])
+    good_surr=np.array(dfile['filt_surr_masks'])
     
 else:
     num_masks=len(dfile['masks_center'])
-    good_masks=dfile['masks_center']
-    good_surr=dfile['masks_surround']
+    good_masks=np.array(dfile['masks_center'])
+    good_surr=np.array(dfile['masks_surround'])
 
 resolution = [512, 512]
 
@@ -84,9 +84,15 @@ file_list=[]
 frame_num_tot = 0
 for data_folder in data_folders:
               
-    dir_files=ip.full_file_path(os.path.join(data_folder,'corrected'), prefix='corrected', exclusion='projection')         
+    dir_files=ip.full_file_path(data_folder, prefix='corrected', exclusion='projection')         
     dir_files.sort()
-    frame_num_tot+=(len(dir_files)-1)*2000+1500
+    
+    #to get the total number of frames in the movie to pre-allocate, read the first tiff and the last
+    chunk_size=np.shape(tf.imread(dir_files[0]))[0]
+    end_size= np.shape(tf.imread(dir_files[-1]))[0]
+    data_size=(len(dir_files)-1)*chunk_size+end_size
+    
+    frame_num_tot+=data_size
 
     file_list.append(dir_files)
 
@@ -95,9 +101,13 @@ file_list=[item for items in file_list for item in items]
 
 os.chdir(curr_folder)
 
-
 data_shape = (frame_num_tot, resolution[0], resolution[1])
 print ('\nWriting H5 file: ' + save_fn)
+
+if os.path.isfile(save_fn):
+        print ('H5 movie File EXISTS: Overwriting previous version with current')
+        os.remove(save_fn)
+        
 save_f = h5py.File(save_fn)
 save_dset = save_f.create_dataset('2p_movie', data_shape, dtype=np.int16, compression='lzf')
 
@@ -128,11 +138,7 @@ surr_traces=[]
 good_axons=[]
 good_pil=[]
 
-good_masks=[]
-good_surr=[]
 
-good_counter=0
-ecc_counter=0
 #extract traces
 for t in range (num_masks):
     print ('\n extracting trace from mask # ' + str(t) + ' of total mask number ' + str(num_masks))
@@ -150,22 +156,31 @@ for t in range (num_masks):
     ecc=ip.measure_eccentricity(good_masks[t])
     
     #plot and save each trace
-    f = plt.figure(figsize=(20,10))
-    ax1 = f.add_subplot(211)    
+    f = plt.figure(figsize=(20,15))
+    ax1 = f.add_subplot(311)    
     ax1.imshow(ia.array_nor(tf.imread(background_file_name)), cmap='gray', clim=[0,0.075])
     
     pt.plot_mask_borders(good_masks[t], plotAxis=ax1,is_filled=True,color='green',borderWidth=1,zoom=1,alpha=0.5)
     pt.plot_mask_borders(good_surr[t], plotAxis=ax1,is_filled=True,color='red',borderWidth=1,zoom=1,alpha=0.15)
       
-    plt.text(0,600,s= 'ROI skewness (absolute value) from frames = ' + str(skewed))
-    plt.text(0,620,s= 'ROI eccentricity = ' + str(ecc))
-    plt.text(0,640, s= 'ROI area ' + str(roi.get_binary_area()) )
+    plt.text(-1000,300,s= 'ROI skewness (abs)  = ' + str(skewed),fontsize=18)
+    plt.text(-1000,340,s= 'ROI eccentricity = ' + str(ecc),fontsize=18)
+    plt.text(-1000,380, s= 'ROI area ' + str(roi.get_binary_area()),fontsize=18)
+    rmin, rmax, cmin, cmax=ip.bbox(good_masks[t])
+    bbox_thres=(np.float(np.sum(good_masks[t])) / np.float((rmax - rmin)**2 + (cmax - cmin)**2))
+    plt.text(-1000,420, s= 'BBox Thresh ' + str(bbox_thres),fontsize=18)
+    
       
-    ax2 = f.add_subplot(212)    
+    ax2 = f.add_subplot(312)    
             
     ax2.plot(trace, color='g')
-    ax2.plot(surr_trace, color='r')
-    pt.save_figure_without_borders(f, os.path.join(roi_folder, 'roi_'+str(t)+'_.png'), dpi=300)
+    ax2.set_title('ROI Trace without neuropil subtraction')
+    ax3 = f.add_subplot(313) 
+    ax3.set_title('Surround Trace')
+    ax3.plot(surr_trace, color='r')
+    #pt.save_figure_without_borders(f, os.path.join(roi_folder, 'roi_'+str(t)+'_.png'), dpi=300)
+    
+    f.savefig(os.path.join(roi_folder, 'roi_'+str(t)+'_.png'), dpi=300)
     plt.close()  
         
     if neuropil_sub==True:
@@ -175,8 +190,6 @@ for t in range (num_masks):
        
     surr_traces.append(surr_trace)
     traces.append(trace)
-print (str(ecc_counter) + ' ROIS eliminated by eccentricity filter')
-print ('Filtering complete. A total of ' + str(good_counter) + ' good ROIs remain out of an original total of ' + str(num_masks)) 
 
 print '\n plotting ...'
 good_masks=np.asarray(good_masks)
@@ -212,9 +225,15 @@ pt.save_figure_without_borders(f_s_nbg, os.path.join(save_folder, prefix+'_2P_RO
 
 plt.show()
 
+if 'axon_traces' in dfile:
+    print ('extracted traces already detected in HDF5 file. Overwriting with current run')
+    del dfile['axon_traces']
 dset_n=dfile.create_dataset('axon_traces', (num_masks,np.shape(entire_mov)[0]), dtype='f')
 dset_n[:,:]=np.asarray(traces)
 
+if 'surr_traces' in dfile:
+    del dfile['surr_traces']
+    
 dset_o=dfile.create_dataset('surr_traces', (num_masks,np.shape(entire_mov)[0]), dtype='f')
 dset_o[:,:]=np.asarray(surr_traces)
 

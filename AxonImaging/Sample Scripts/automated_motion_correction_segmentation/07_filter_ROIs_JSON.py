@@ -31,8 +31,8 @@ if len(json_path)>0:
         d = json.load(json_data)
     #mouse_id    
     prefix=d['general']['mouse_id']
-    thr = d['roi_filtering']['surround_limit']
-    surround_limit = d['post_proc']['surround_limit']
+    thr = d['roi_filtering']['circ_filter_thresh']
+    
 
 else:
     prefix='M420261'
@@ -114,7 +114,7 @@ for ii in range(masks_v2.shape[0]):
             
         good_counter+=1
     
-print '\n plotting ...'
+print ('\n plotting ...')
 good_masks=np.asarray(good_masks)
 
 #plot ROIS on mean projection

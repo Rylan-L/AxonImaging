@@ -1,0 +1,4 @@
+{"general": {"mouse_id": "386188","expt_folders":["01_movie"],"save_avi":true,"save_mmap":true, "save_down_mean": true, "motion_corr":true,"downsample_avi":10},
+"motion_corr": {"process_num": 6,  "anchor_frame_ind_chunk":8,"anchor_frame_ind_projection":0, "iteration_chunk": 10, "iteration_projection": 10, "max_offset_chunk":50,"max_offset_projection":50},
+"post_proc": {"filter_sigma":2, "cut_thre":1.5, "center_margin":[25,25], "area_range":[25,4500], "overlap_thresh":0.3, "surround_limit":[2, 10]},
+"roi_filtering":{"circ_filter_thresh":0.2, "neuropil_sub": true,"only_filt_traces":true}}

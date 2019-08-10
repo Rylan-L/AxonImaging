@@ -71,9 +71,11 @@ def get_values_from_event_times (signal_trace, signal_ts, events,total_dur=0,rel
         else:
             values.append(signal_trace[index])
     return values
-        
-def threshold_period(signal, threshold, min_low, sample_freq, irregular_sampled_ts=np.array([]),pre_thresh_time=False,
-	low_threshold=False,min_time=0.01, trace_end=994.0, exclusion_signal=np.array([]), exclusion_thresh=0, exclusion_sf=0):
+
+
+
+def threshold_period(signal, threshold, min_low, sample_freq=30.0, irregular_sampled_ts=np.array([]),min_time_between=False, pre_thresh_time=False,low_threshold=False,min_time=0.01, trace_end=994.0, 
+                     exclusion_signal=np.array([]), exclusion_thresh=0, exclusion_dur=False, exclusion_sf=30., exclusion_logic='exclude'):
     '''Defines onset times for when a signal crosses a threshold value for an EXTENDED period of time.
     The period of time for the period is defined by min_low, which specifies the minimum amount of time the signal must
     fall below the previously defined threshold to end the period. 
@@ -91,10 +93,11 @@ def threshold_period(signal, threshold, min_low, sample_freq, irregular_sampled_
     :param min_time: minimum amount of a whole period (in time) that is allowed for inclusion (seconds). I.E. only want periods of at least x length.
     :trace_end: the end of the signal region for analysis. Typically this is the end of an imaging session and is included to avoid analyzing data where there is no corresponding images.
     
+    :param exclusion_signal: an optional, different array to use as an exclusion (or exclusive inclusive) indicator of 
+    
     
     :return list of start, end, and duration times for each period
     '''
-    
     end_ind=int(round(trace_end*sample_freq))
        
     #find positions above the threshold (beginning of period). 
@@ -107,8 +110,18 @@ def threshold_period(signal, threshold, min_low, sample_freq, irregular_sampled_
        
     else:
         downwards=last_pos_above_low_thresh(signal[:end_ind],threshold, low_threshold=low_threshold)
-    
-    
+    #check for weird situation where the trace starts above the threshold
+    if signal[0]>=threshold:
+        print ('Warning: the first point in the trace is already above threshold. Discarding the first downcrossing.')
+        print(downwards.size)
+
+        try:
+            downwards=downwards[1:-1]
+            downwards=np.append(downwards, (downwards[-1]+10))
+        except:
+            print ('Signal appears to start above the threshold and never go below. Therefore, no threshold crossings found')
+            return
+                
     #check the threshold crossing to make sure an extended period of time prior to the upcrossing that the signal is below
     if pre_thresh_time!=False:
         #check to see if an arbituary number of points before the threshold are below the threshold
@@ -143,29 +156,63 @@ def threshold_period(signal, threshold, min_low, sample_freq, irregular_sampled_
         
         np.asarray(t_up_conv)
         np.asarray(t_down_conv)
-   
-     
+
     threshed_epochs_u=[]
     threshed_epochs_d=[]
-    
     
     if exclusion_signal.size==0:
         #define the orginal epochs by zipping them together into tuple
         epoch_o=zip(t_up_conv,t_down_conv)
     else:
         for ii in range(len(t_up_conv)-1):
-            exclusion_up_t=t_up_conv[ii] * exclusion_sf
-            exclusion_d_t=t_down_conv[[ii]]* exclusion_sf
-            if  np.mean(exclusion_signal[int(exclusion_up_t):int(exclusion_d_t)],axis=0)<exclusion_thresh:
-                  threshed_epochs_u.append(t_up_conv[ii])  
-                  threshed_epochs_d.append(t_down_conv[ii])
-                  
-        epoch_o=zip(threshed_epochs_u,threshed_epochs_d)
+            
+            #convert the valid upcrossing time to the units of the exclusion signal
+            #note t_up_conv[ii] is in seconds, get exclusion 
 
+            if isinstance(exclusion_dur, (tuple)):
+                #subtract the first tuple value from the up time to get the beginning. Multiple by the sampling frequency to get in terms of indices of the array
+                exclude_start=int(round((t_up_conv[ii]-exclusion_dur[0])*exclusion_sf))
+                
+                #add the second tuple value from the up time to get the end
+                exclude_end=int(round((t_up_conv[ii]+exclusion_dur[1] )*exclusion_sf))     
+                
+                
+                if exclude_start<1:
+                    print ('There are not enough time points at the beginning of the exclusion trace to calculate the specified exclusion_dur beginning. Setting the start equal to the first time point')
+                    exclude_start=1
+                if exclude_end > np.shape(exclusion_signal)[0]:
+                    print ('There are not enough time points at the End of the exclusion trace to calculate the specified exclusion_dur ending. Setting the ending equal to the last time point')
+                    exclude_end=np.shape(exclusion_signal)[0]
+                    
+            elif isinstance(exclusion_dur, (int, float)):
+                print ('only single duration timepoint passed. Assuming this timepoint refers to a period prior to the onset of the threshold crossing (start= passed exclusion_dur, end=start of epoch) ')
+                exclude_start=int(round((t_up_conv[ii]-exclusion_dur)*exclusion_sf))
+                exclude_end=t_up_conv[ii]*exclusion_sf
+                
+            else:
+                raise Exception ('Error: exclusion signal is passed in but no associated duration(s)')
+            
+            exclusion_trace=exclusion_signal[exclude_start:exclude_end]
+    
+            
+            #determine if there are any upwards threshold crossing in the trace.
+            exclusion_ts_above=last_pos_below_thresh(exclusion_trace,threshold=exclusion_thresh)
+            
+            #to account for cases where the exclusion trace starts in an "UP"-threshold state, look for downward going events
+            exclusion_ts_below=last_pos_above_low_thresh(exclusion_trace,threshold=exclusion_thresh,low_threshold=False)
+            
+            if  exclusion_logic=='exclude' and (exclusion_ts_above.size==0) and (exclusion_ts_below.size==0):
+                threshed_epochs_u.append(t_up_conv[ii])  
+                threshed_epochs_d.append(t_down_conv[ii])
+            
+            elif exclusion_logic=='include' and exclusion_ts_above.size>0 :
+                threshed_epochs_u.append(t_up_conv[ii])  
+                threshed_epochs_d.append(t_down_conv[ii])
+
+        epoch_o=zip(threshed_epochs_u,threshed_epochs_d)
         
     #to handle the last instance, append a very large value beyond where data was acquired
     epoch_o.append([trace_end+5,(trace_end+5.01)])
-    
         
     epoch_start=[]
     epoch_end=[]
@@ -200,25 +247,32 @@ def threshold_period(signal, threshold, min_low, sample_freq, irregular_sampled_
         else:
             print ('error: could not be calculated')
 
-    #measure duration of each period
+    #measure duration of each period, exclude durations shorter than teh minimum time
     periods=[]
     for x in range(len(epoch_start)):
         
         duration=epoch_end[x]-epoch_start[x]
         if duration >= min_time:
-            periods.append([epoch_start[x], epoch_end[x], duration])
+            if isinstance(min_time_between, (int, float)) and min_time_between!=0.:
+                #dtermine the time between this start period and the next
+                if (x+1) >= len(epoch_start):
+                    continue
+                else:
+                    time_between_next=epoch_start[x+1]-epoch_start[x]
+                    if time_between_next>=min_time_between:
+                            periods.append([epoch_start[x], epoch_end[x], duration])
+                            
+            else:
+                periods.append([epoch_start[x], epoch_end[x], duration])
+    periods=np.array(periods)
     
-    if len(periods)==0:
-        print ('NO VALID PERIODS FOUND!!')
-
-        return
-
-    elif len(periods)>0:
-        periods=np.array(periods)
-    
+    if periods.size==0:
+        print (' No periods found!!!')
+    else:
+        
         print ('Number of thresholded epochs found =  ' + str(np.shape(periods)[0]) + '. Median length (seconds) of each epoch is ' + str(np.median(periods[:,2])))
-        #return start and end times + duration as array
-        return periods
+    #return start and end times + duration as array
+    return periods
     
 
 def signal_to_mean_noise (traces, sample_freq, signal_range, noise_range):
@@ -245,119 +299,114 @@ def signal_to_mean_noise (traces, sample_freq, signal_range, noise_range):
 
  
 
-#def get_STA_traces_stamps(trace, frame_ts, event_onset_times, chunk_start, chunk_dur, dff=False, mean_frame_calculation='mean', verbose=True):
-#    '''
-#    Get stimulus-triggered average trace with input being in terms of time-stamps (digital) and being calculated around a stimulus of constant, known time. (constant periods, digital)
-#    Returns a stimulus-triggered averaged trace (STA trace) centered around a stimulus of set time with user defined pre- and post- stimulus periods.
-#
-#    NOTE: units are important here. The trace, frame_ts, and event_onset_times must be in the same time base (likely seconds)
-#    
-#    :param trace: full trace that you wish to parse into a stimulus-triggered average (typically fluorescence trace)
-#    :param frame_ts: time stamps for when each sample from the trace (above) was captured. Typically this is imaging (2-P) frames.
-#    :param eventOnsetTimes: the timestamps for the stimulus/event of interest
-#    :param chunkStart: chunk start relative to the stimulus/event of interest
-#    :param chunkDur: duration of each chunk from the beginning of chunkstart, typically abs(pre_gap_dur)+post_gap_dur+stim_dur
-#    :param dff: whether to return values in terms of change from baseline normalized values (df/f)
-#    :param mean_frame_calculation: when calculating the mean duration of each of the frames (from Frame_TS) whether to use mean or median.
-#    :return: averaged trace of all chunks
-#    '''
-#    if mean_frame_calculation=='mean':
-#        mean_frame_dur = np.mean(np.diff(frame_ts))
-#        
-#    elif mean_frame_calculation=='median':
-#        mean_frame_dur = np.median(np.diff(frame_ts))
-#        
-#        
-#    chunk_frame_dur = int(np.ceil(chunk_dur / mean_frame_dur))
-#       
-#    if verbose:
-#        print ('Period Duration: ') + chunk_dur
-#        print 'Mean Duration of Each Frame:', mean_frame_dur
-#        print 'Number of frames per period:', chunk_frame_dur
-#            
-#    chunk_start_frame = int(np.floor(chunk_start/ mean_frame_dur))
-#    
-#    traces = []
-#    df_traces=[]
-#   
-#    
-#    if np.shape(event_onset_times):
-#        
-#        for x in range(len(event_onset_times)):
-#            onset_frame_ind= np.argmin(np.abs(frame_ts-event_onset_times[x]))
-#            chunk_start_frame_ind = onset_frame_ind + chunk_start_frame
-#            chunk_end_frame_ind = chunk_start_frame_ind + chunk_frame_dur
-#                    
-#            if verbose:
-#                print 'Period:',int(x),' Starting frame index:',chunk_start_frame_ind,'; Ending frame index', chunk_end_frame_ind
-#            
-#            if chunk_end_frame_ind <= trace.shape[0]:
-#                
-#                curr_trace = trace[chunk_start_frame_ind:chunk_end_frame_ind].astype(np.float32)
-#                traces.append(curr_trace)
-#                
-#                            
-#                df_curr_trace=stim_df_f(curr_trace, baseline_period=abs(chunk_start), frame_rate=30.)
-#                df_traces.append(df_curr_trace)
-#                
-#                
-#            else:
-#                if verbose:
-#                    print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus', chunk_end_frame_ind
-#                continue
-#    
-#    else:
-#        print ('Only single stimulus period found, no averaging performed')
-#        onset_frame_ind= np.argmin(np.abs(frame_ts-event_onset_times))
-#        chunk_start_frame_ind = onset_frame_ind + chunk_start_frame
-#        chunk_end_frame_ind = chunk_start_frame_ind + chunk_frame_dur
-#        
-#        curr_trace=trace[chunk_start_frame_ind:chunk_end_frame_ind].astype(np.float32)
-#        traces = curr_trace
-#        df_traces=stim_df_f(curr_trace, baseline_period=chunk_start, frame_rate=30.)
-#        
-#    if dff==True:
-#        return np.asarray(df_traces)
-#    elif dff==False:
-#        return np.asarray(traces)     
+def get_STA_traces_stamps(trace, frame_ts, event_onset_times, chunk_start, chunk_dur, dff=False, mean_frame_calculation='mean', verbose=True):
+    '''
+    Get stimulus-triggered average trace with input being in terms of time-stamps (digital) and being calculated around a stimulus of constant, known time. (constant periods, digital)
+    Returns a stimulus-triggered averaged trace (STA trace) centered around a stimulus of set time with user defined pre- and post- stimulus periods.
+
+    NOTE: units are important here. The trace, frame_ts, and event_onset_times must be in the same time base (likely seconds)
+    
+    :param trace: full trace that you wish to parse into a stimulus-triggered average (typically fluorescence trace)
+    :param frame_ts: time stamps for when each sample from the trace (above) was captured. Typically this is imaging (2-P) frames.
+    :param eventOnsetTimes: the timestamps for the stimulus/event of interest
+    :param chunkStart: chunk start relative to the stimulus/event of interest
+    :param chunkDur: duration of each chunk from the beginning of chunkstart, typically abs(pre_gap_dur)+post_gap_dur+stim_dur
+    :param dff: whether to return values in terms of change from baseline normalized values (df/f)
+    :param mean_frame_calculation: when calculating the mean duration of each of the frames (from Frame_TS) whether to use mean or median.
+    :return: averaged trace of all chunks
+    '''
+    if mean_frame_calculation=='mean':
+        mean_frame_dur = np.mean(np.diff(frame_ts))
+        
+    elif mean_frame_calculation=='median':
+        mean_frame_dur = np.median(np.diff(frame_ts))
+        
+        
+    chunk_frame_dur = int(np.ceil(chunk_dur / mean_frame_dur))
+       
+    if verbose:
+        print ('Period Duration:'+ str(chunk_dur))
+        print ('Mean Duration of Each Frame:' + str(mean_frame_dur))
+        print ('Number of frames per period:' + str(chunk_frame_dur))
+            
+    chunk_start_frame = int(np.floor(chunk_start/ mean_frame_dur))
+    
+    traces = []
+    df_traces=[]
+    n = 0
+    if np.shape(event_onset_times):
+        
+        for x in range(len(event_onset_times)):
+            onset_frame_ind= np.argmin(np.abs(frame_ts-event_onset_times[x]))
+            chunk_start_frame_ind = onset_frame_ind + chunk_start_frame
+            chunk_end_frame_ind = chunk_start_frame_ind + chunk_frame_dur
+                    
+            if verbose:
+                print ('Period:' +str(int(n)) + ' Starting frame index:' + str(chunk_start_frame_ind) + ' Ending frame index '+ str(chunk_end_frame_ind))
+            
+            if chunk_end_frame_ind <= trace.shape[0]:
+                
+                curr_trace = trace[chunk_start_frame_ind:chunk_end_frame_ind].astype(np.float32)
+                traces.append(curr_trace)
+                
+                            
+                df_curr_trace=stim_df_f(curr_trace, baseline_period=chunk_start, frame_rate=30)
+                df_traces.append(df_curr_trace)
+                
+                n += 1
+            else:
+                print ('trace length ' + str(trace.shape[0]) + ' is shorter than the referenced start time for the next stimulus ' + str(chunk_end_frame_ind))
+                continue
+    else:
+        print ('Only single stimulus period found, no averaging performed')
+        onset_frame_ind= np.argmin(np.abs(frame_ts-event_onset_times))
+        chunk_start_frame_ind = onset_frame_ind + chunk_start_frame
+        chunk_end_frame_ind = chunk_start_frame_ind + chunk_frame_dur
+        
+        curr_trace=trace[chunk_start_frame_ind:chunk_end_frame_ind].astype(np.float32)
+        traces = curr_trace
+        df_traces=stim_df_f(curr_trace, baseline_period=chunk_start, frame_rate=30)
+        
+    if dff==True:
+        return df_traces
+    elif dff==False:
+        return traces  
 
 
+def get_event_trig_avg_stamps(trace, time_stamps, event_onset_times, event_end_times, time_before=1, time_after=1, verbose=True):
+    '''
+    Get event-triggered average trace with input being in terms of time-stamps (digital) and with events being irregular and NOT of constant time. (variable periods, digital)
 
-#def get_event_trig_avg_stamps(trace, time_stamps, event_onset_times, event_end_times, time_before=1, time_after=1, verbose=True):
-#    '''
-#    Get event-triggered average trace with input being in terms of time-stamps (digital) and with events being irregular and NOT of constant time. (variable periods, digital)
-#
-#    NOTE: units are important here. The trace, time_stamps, and event_onset_times must be in the same time base (likely seconds)
-#    
-#    :param trace: full trace that you wish to parse into a stimulus-triggered average (typically fluorescence trace)
-#    :param time_stamps: time stamps for when each sample from the trace (above) was captured. Typically this is imaging (2-P) frames.
-#    :param event_onset_times: the timestamps for the onset of the event of interest (units of time)
-#    :param event_end_times: the timestamps for the end of the event of interest (units of time)
-#    :param time_before: how much time before the event onset to include in the sample (units of time)
-#    :param time_after: how much time after the event onset to include in the sample (units of time)
-#    :return: traces for each onset and end, optionally with time before and after if specified by time_before and time_after
-#    '''
-#    traces = []
-#    n = 0
-#
-#    for x in range(len(event_onset_times)):
-#        onset_frame_ind= np.argmin(np.abs(time_stamps-(event_onset_times[x]-time_before)))
-#        end_frame_ind=np.argmin(np.abs(time_stamps-(event_end_times[x]+time_after)))
-#        #chunk_start_frame_ind = onset_frame_ind + chunk_start_frame
-#        
-#        if verbose:
-#            print 'Chunk:',int(n),' Starting frame index:',onset_frame_ind,'; Ending frame index', end_frame_ind
-#        
-#        if end_frame_ind <= trace.shape[0]:
-#            
-#            curr_trace = trace[onset_frame_ind:end_frame_ind].astype(np.float32)
-#            traces.append(curr_trace)
-#            n += 1
-#        else:
-#            if verbose:
-#                print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus', end_frame_ind
-#            continue
-#    return traces
+    NOTE: units are important here. The trace, time_stamps, and event_onset_times must be in the same time base (likely seconds)
+    
+    :param trace: full trace that you wish to parse into a stimulus-triggered average (typically fluorescence trace)
+    :param time_stamps: time stamps for when each sample from the trace (above) was captured. Typically this is imaging (2-P) frames.
+    :param event_onset_times: the timestamps for the onset of the event of interest (units of time)
+    :param event_end_times: the timestamps for the end of the event of interest (units of time)
+    :param time_before: how much time before the event onset to include in the sample (units of time)
+    :param time_after: how much time after the event onset to include in the sample (units of time)
+    :return: traces for each onset and end, optionally with time before and after if specified by time_before and time_after
+    '''
+    traces = []
+    n = 0
+
+    for x in range(len(event_onset_times)):
+        onset_frame_ind= np.argmin(np.abs(time_stamps-(event_onset_times[x]-time_before)))
+        end_frame_ind=np.argmin(np.abs(time_stamps-(event_end_times[x]+time_after)))
+        #chunk_start_frame_ind = onset_frame_ind + chunk_start_frame
+        
+        if verbose:
+            print ('Chunk:' + str(int(n)) + ' Starting frame index:' + str(onset_frame_ind) + '; Ending frame index' + str(end_frame_ind))
+        
+        if end_frame_ind <= trace.shape[0]:
+            
+            curr_trace = trace[onset_frame_ind:end_frame_ind].astype(np.float32)
+            traces.append(curr_trace)
+            n += 1
+        else:
+            print ('trace length'+ str(trace.shape[0]) + ' is shorter than the referenced start time for the next stimulus ' +str(end_frame_ind))
+            continue
+    return traces
 
 
 
@@ -375,7 +424,7 @@ def get_STA_traces_samples (trace, event_onset_times, chunk_start, total_dur, sa
     '''
 
     if dff_baseline==0.0:
-		dff_baseline=abs(chunk_start)
+        dff_baseline=abs(chunk_start)
 
 
     #get the time in (in seconds) for each sample. This assume a linear spacing of samples.
@@ -392,8 +441,8 @@ def get_STA_traces_samples (trace, event_onset_times, chunk_start, total_dur, sa
         
     if verbose:
         
-        print '# samples per period:', chunk_dur
-        print 'mean duration of each sample (seconds):', mean_sample_dur
+        print ('# samples per period:' + str(chunk_dur))
+        print ('mean duration of each sample (seconds):' + str(mean_sample_dur))
     
     traces = []
   
@@ -412,7 +461,7 @@ def get_STA_traces_samples (trace, event_onset_times, chunk_start, total_dur, sa
         end_trace=start_trace+chunk_dur
         
         if verbose:
-            print 'Period:',int(n),' Starting frame index:',start_trace,'; Ending frame index', end_trace
+            print ('Period:' + str(int(n)) + ' Starting frame index: ' + str(start_trace) + ' Ending frame index'+ str(end_trace))
         
         if end_trace <= trace.shape[0]:
 
@@ -426,16 +475,17 @@ def get_STA_traces_samples (trace, event_onset_times, chunk_start, total_dur, sa
             
         else:
             if verbose:
-                print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus'
+                print ('trace length ' + str(trace.shape[0]) +' is shorter than the referenced start time for the next stimulus')
             continue
     
 
     if dff==True & verbose==True:
-    	print ('Returning DF_F traces using first ' + str(dff_baseline) + ' seconds of the trace as the baseline')
+        print ('Returning DF_F traces using first ' + str(dff_baseline) + ' seconds of the trace as the baseline')
+        
+    return traces          
 
-   	return traces          
 
-def get_event_trig_avg_samples (trace, event_onset_times, event_end_times, sample_freq, time_before=1, time_after=1, verbose=True):
+def get_event_trig_avg_samples (trace, event_onset_times, event_end_times, sample_freq, time_before=2., time_after=2., dff=False,dff_baseline=0.,verbose=False):
     
     '''
     Get stimulus-triggered average(STA) trace for data where the units are not already in terms of seconds, but are in terms of continous samples (analog). (variable periods, analog)
@@ -444,35 +494,83 @@ def get_event_trig_avg_samples (trace, event_onset_times, event_end_times, sampl
         
     :param trace: full trace that you wish to parse into a stimulus-triggered average (typically fluorescence trace). In this instance, it needs to be in terms of samples 
     :param event_onset_times: the timestamps for the stimulus/event of interest. These should be in units of time.
-    :param chunk_start: chunk start relative to the stimulus/event of interest
-    :param total_dur: duration of each chunk from the beginning of chunkstart, typically abs(pre_gap_dur)+post_gap_dur+stim_dur
+    :param event_end_times: the timestamps for the end of the stimulus/event of interest. 
+    :param time_before: amount of extra time before the event onset to also extract
+    :param time_after: amount of extra time AFTER the event onset to also extract
+    :param dff: whether to return the resulting trace normalized to the time before period
+    :param dff_baseline: allows for the specification of the df_f baseline in terms of relative time of the trace. If not specified the time_before variable is used.
+
+
     :return: traces for each period in units of the orginal sample units 
     '''
-    #get the time in (in seconds) for each sample. This assume a linear spacing of samples.
+    #get the time in (in seconds) for each sample. This assume a constitent spacing of samples (i.e every 60 seconds).
     #total time (in seconds) for the trace
+    
     sample_times=np.linspace(start=0,stop=trace.size/sample_freq,num=trace.size)
     
     traces = []
     n = 0
 
-    for x in range(len(event_onset_times)):
+    if dff_baseline==0.:
+        dff_baseline=time_before
+
+    #check to see if there is multiple onset times (list) or if its a single instance
+
+    if type(event_onset_times)==list:
+
+        for x in range(len(event_onset_times)):
         
-        #find the nearest analog sample to the event onset times
-        start_trace=np.argmin(np.abs(sample_times-(event_onset_times[x]-time_before)))
-        end_trace=np.argmin(np.abs(sample_times-(event_end_times[x]+time_after)))
-               
+            #find the nearest analog sample to the event onset times
+            start_trace=np.argmin(np.abs(sample_times-(event_onset_times[x]-abs(time_before))))
+            end_trace=np.argmin(np.abs(sample_times-(event_end_times[x]+time_after)))
+                   
+            if verbose:
+                print ('Period:' + str(int(n)) + ' Starting frame index: ' + str(start_trace) + '. Ending frame index '+ str(end_trace))
+            
+            if end_trace <= trace.shape[0]:
+
+                if dff==True:
+
+                    curr_trace=stim_df_f(arr=trace[start_trace:end_trace].astype(np.float32),baseline_period=dff_baseline,frame_rate=30.0)
+                
+                elif dff==False:
+                    curr_trace = trace[start_trace:end_trace].astype(np.float32)
+                
+                traces.append(curr_trace)
+                n += 1
+            else:
+                print ('trace length'+ str(trace.shape[0]) + ' is shorter than the referenced start time for the next stimulus ' )
+                continue
+
+    #take into account times where only a single onset is passed
+    else:
+        expected_dur=(event_end_times-event_onset_times)+time_before+time_after
+        
+        start_trace=np.argmin(np.abs(sample_times-(event_onset_times-abs(time_before))))
+        end_trace=np.argmin(np.abs(sample_times-(event_end_times+time_after)))
+        
+        trace_dur=(end_trace-start_trace)/sample_freq
+        
+        if int(round(trace_dur))!=int(round(expected_dur)):
+            if verbose:
+                print ('Expected duration: ' + str(expected_dur) + ' and trace duration '+ str(trace_dur) + ' do not match ')
+        
         if verbose:
-            print 'Period:',int(n),' Starting frame index:',start_trace,'; Ending frame index', end_trace
+                print ('Only single onset/end passed: Starting frame index:' + str(start_trace) + '.  Ending frame index: ' + str(end_trace) + '. Total dur ' + str(trace_dur))
         
         if end_trace <= trace.shape[0]:
-            
-            curr_trace = trace[start_trace:end_trace].astype(np.float32)
-            traces.append(curr_trace)
-            n += 1
+            if dff==True:
+                if verbose:
+                    print ('Calculating DF/F from ')
+                    print (dff_baseline)
+                curr_trace=stim_df_f(arr=trace[start_trace:end_trace].astype(np.float32),baseline_period=dff_baseline,frame_rate=30.0)
+
+            elif dff==False:
+                curr_trace = trace[start_trace:end_trace].astype(np.float32)
         else:
-            if verbose:
-                print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus'
-            continue
+            print ('trace length ' + str(trace.shape[0]) + ' is shorter than the referenced start time for the next stimulus')
+
+        traces=curr_trace
 
     return traces
 
@@ -608,9 +706,7 @@ def downsample_TS_by_target_TS(signal, signal_ts, target_ts, time_around=0.0,ver
     ds_sig=[]
     counter=0
     for stamp in target_ts:
-
         #get timestamp half of the targets sf ahead and behind. Convert to ms
-
         #find the nearest sample time for the signal relative to the time stamp
 
         if time_around>0:
@@ -650,7 +746,6 @@ def downsample_TS_by_target_TS(signal, signal_ts, target_ts, time_around=0.0,ver
             if counter%500==0 or counter==1:
                                 
                 per=int(counter/float(len(target_ts))*100)
-
                 print ('sample '+ str(counter)+ ' of '+ str(len (target_ts)) + ' processed.  '+ str( per ) + ' percent complete.')
         
         ds_sig.append(avged_sample)
@@ -748,24 +843,22 @@ def stim_df_f (arr, baseline_period, frame_rate=30., verbose=True):
     arr=np.asarray(arr)
 
     
-    if isinstance(baseline_period, (int, long, float)):
+    if isinstance(baseline_period, (int, float)):
         baseline_frames=int(abs(baseline_period)*frame_rate)
        
     
 
     def check_fo(arr,fo):
     	#function to check for strange values of Fo
-
-    	if fo <0.0:
+        if fo <0.0:
             if verbose==True:
                 print ('WARNING: Mean Baseline fluorescence is negative in DF/F calculation! Currently ' + str(f_o) +' Adding 50 to trace (typical neuropil value)' )
-
             arr=arr+75.
             fo=f_o+75.
-
+            
             delta_f=arr-fo
             df_f=delta_f/fo
-        
+            
         elif fo==0.0:
             delta_f=arr-fo
             if verbose==True:
@@ -790,7 +883,7 @@ def stim_df_f (arr, baseline_period, frame_rate=30., verbose=True):
                     
                     f_o=np.mean(arr[xx][start_base:end_base])
 
-            elif isinstance(baseline_period, (int, long, float)):
+            elif isinstance(baseline_period, (int, float)):
                     f_o=np.mean(arr[xx][0:baseline_frames-1])
 
             f_o=np.mean(arr[xx][0:baseline_frames-1])
@@ -798,8 +891,8 @@ def stim_df_f (arr, baseline_period, frame_rate=30., verbose=True):
             df_f=check_fo(arr=arr[xx],fo=f_o)
 
             df_fs.append(df_f)
-
-    	return np.array(df_fs)
+            
+        return np.array(df_fs)
     
     else:
         if isinstance(baseline_period, tuple):
@@ -807,7 +900,7 @@ def stim_df_f (arr, baseline_period, frame_rate=30., verbose=True):
             end_base=int(round(baseline_period[1]*frame_rate))
             f_o=np.mean(arr[start_base:end_base])
 
-        elif isinstance(baseline_period, (int, long, float)):
+        elif isinstance(baseline_period, (int, float)):
             f_o=np.mean(arr[0:baseline_frames-1])
                     
             
@@ -817,9 +910,8 @@ def stim_df_f (arr, baseline_period, frame_rate=30., verbose=True):
             print ('error: baseline period is not a number')
         
         df_f=check_fo(arr=arr,fo=f_o)
-
-
-    	return df_f
+    
+        return df_f
 
 
 

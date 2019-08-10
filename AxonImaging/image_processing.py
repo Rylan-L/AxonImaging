@@ -8,6 +8,7 @@ from skimage.measure import label as sk_label
 from skimage.measure import regionprops
 
 
+
 def split_bin(arr,downsample=0.5,split=True):
     '''Spatially downsample an image (loaded as array)
     
@@ -21,7 +22,7 @@ def split_bin(arr,downsample=0.5,split=True):
     '''
 
     if len (arr.shape) !=2:
-        raise ValueError, 'Spatial Binning only supports 2D images. Please reformat or run in loop.'
+        raise ValueError( 'Spatial Binning only supports 2D images. Please reformat or run in loop.')
         
     #to get around size restrictions, split array in two first if needed
     if split==True:
@@ -39,6 +40,29 @@ def split_bin(arr,downsample=0.5,split=True):
         
         return down
         
+
+
+def pad_movie_pix(movie, desired_xy=(512,512), value_to_add=0):
+    '''Adds pixels to either the x or y dimesion of a 3D array (movie) to make it the desired size
+
+    :param  movie (3D array): movie that needs to be reshaped
+    :param desired_xy: desired X,Y dimensions after reshaping
+    :param value_to_add: value for the new pixels added
+
+    returns reshpaed movie
+    
+    '''
+    
+    if np.shape(movie)[0]!=desired_xy[0] or np.shape(movie)[1]!=desired_xy[1]:
+        pix_to_add_y=desired_xy[0]-np.shape(movie)[1]
+        pix_to_add_x=desired_xy[1]-np.shape(movie)[2]
+
+        reshape_movie=np.pad(movie,[(0,0),(0,pix_to_add_y),(0,pix_to_add_x)],'constant', constant_values=value_to_add)
+        return reshape_movie
+    else:
+        print ('movie is already correct size, not reshaping')
+        return movie
+
 
 def get_traces_from_masks (roi_mask, movie_arr):
 	'''Get a trace from a movie array using a binary mask to select a region of interest
@@ -108,7 +132,7 @@ def imagej_ROI_traces(input_folder, movie_file, roi_file_prefix='Roi', return_ma
 class ROI (object):
     
     def __init__(self, roi):
-        if len(roi.shape)!=2: raise ValueError, 'ROI is not 2-D. Please reformat'
+        if len(roi.shape)!=2: raise ValueError ('ROI is not 2-D. Please reformat')
         
         self.dimension = roi.shape
         self.pixels = np.where(np.logical_and(roi!=0, ~np.isnan(roi)))
@@ -215,7 +239,8 @@ def downsample_time(movie_path, downsample_by=10, resave_as=''):
     '''
 
     #if the file_path is an h5, downsample in chunks by reading each from disk (saves on memory)
-    if movie_path[-2:] == '.h5':
+    if movie_path[-2:] == 'h5':
+        import h5py
         h5_file= h5py.File(movie_path,'r')
         #if h5, currently assumes the movie is stored as the key 'data'
         movie=h5_file['data']
@@ -268,10 +293,10 @@ def concenate_tifs_folder(path,save=True):
    
     os.chdir(path)
 
-    file_list = [f for f in os.listdir(path) if f[-3:] == 'tif']
+    file_list=full_file_path(path, file_type='.tif',prefix='corrected', exclusion='Null', case_insens=True)
     file_list.sort()
     
-    print '\n'.join(file_list)
+    print ('\n').join(file_list)
     
     mov = []
     
@@ -287,6 +312,7 @@ def concenate_tifs_folder(path,save=True):
     
     else:
         return mov
+        
 
 
 def int2str(num,length=None):
@@ -299,7 +325,7 @@ def int2str(num,length=None):
 
     rawstr = str(int(num))
     if length is None or length == len(rawstr):return rawstr
-    elif length < len(rawstr): raise ValueError, 'Length of the number is longer then defined display length!'
+    elif length < len(rawstr): raise ValueError ('Length of the number is longer then defined display length!')
     elif length > len(rawstr): return '0'*(length-len(rawstr)) + rawstr
     
 
@@ -402,8 +428,23 @@ def plot_mask_borders(mask, plot_axis=None, color='#ff0000', border_width=2, **k
 
 
 def full_file_path(directory, file_type='.tif',prefix='', exclusion='Null', case_insens=True):
-    """Returns a list of files (the full path) in a directory that contain the characters in "prefix" with the given extension, while excluding files containing the "exclusion" characters"""
-
+    """Returns a list of files (the full path) in a directory that contain the characters in "prefix"
+    with the given extension, while excluding files containing the "exclusion" characters
+    
+    Args
+        -----
+        directory (str): path to directory to search in
+        file_type (str): extension of file to find ('.tif')
+        prefix (str): string that must be in the filename to be found
+        exclusion (str): string to used to exclude various files that would normally be found based on being in
+                        directory
+        case_insens(bool): whether to be concerned with the case of the filename when searching/excluding
+                        
+        Returns
+        _______
+        (list) full file paths for all files that are in the directory matchign the criteria specified
+    
+    """
     file_ext_length=len(file_type)
     for dirpath,_,filenames in os.walk(directory):
       if case_insens==True:

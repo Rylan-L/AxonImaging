@@ -245,119 +245,119 @@ def signal_to_mean_noise (traces, sample_freq, signal_range, noise_range):
 
  
 
-def get_STA_traces_stamps(trace, frame_ts, event_onset_times, chunk_start, chunk_dur, dff=False, mean_frame_calculation='mean', verbose=True):
-    '''
-    Get stimulus-triggered average trace with input being in terms of time-stamps (digital) and being calculated around a stimulus of constant, known time. (constant periods, digital)
-    Returns a stimulus-triggered averaged trace (STA trace) centered around a stimulus of set time with user defined pre- and post- stimulus periods.
+#def get_STA_traces_stamps(trace, frame_ts, event_onset_times, chunk_start, chunk_dur, dff=False, mean_frame_calculation='mean', verbose=True):
+#    '''
+#    Get stimulus-triggered average trace with input being in terms of time-stamps (digital) and being calculated around a stimulus of constant, known time. (constant periods, digital)
+#    Returns a stimulus-triggered averaged trace (STA trace) centered around a stimulus of set time with user defined pre- and post- stimulus periods.
+#
+#    NOTE: units are important here. The trace, frame_ts, and event_onset_times must be in the same time base (likely seconds)
+#    
+#    :param trace: full trace that you wish to parse into a stimulus-triggered average (typically fluorescence trace)
+#    :param frame_ts: time stamps for when each sample from the trace (above) was captured. Typically this is imaging (2-P) frames.
+#    :param eventOnsetTimes: the timestamps for the stimulus/event of interest
+#    :param chunkStart: chunk start relative to the stimulus/event of interest
+#    :param chunkDur: duration of each chunk from the beginning of chunkstart, typically abs(pre_gap_dur)+post_gap_dur+stim_dur
+#    :param dff: whether to return values in terms of change from baseline normalized values (df/f)
+#    :param mean_frame_calculation: when calculating the mean duration of each of the frames (from Frame_TS) whether to use mean or median.
+#    :return: averaged trace of all chunks
+#    '''
+#    if mean_frame_calculation=='mean':
+#        mean_frame_dur = np.mean(np.diff(frame_ts))
+#        
+#    elif mean_frame_calculation=='median':
+#        mean_frame_dur = np.median(np.diff(frame_ts))
+#        
+#        
+#    chunk_frame_dur = int(np.ceil(chunk_dur / mean_frame_dur))
+#       
+#    if verbose:
+#        print ('Period Duration: ') + chunk_dur
+#        print 'Mean Duration of Each Frame:', mean_frame_dur
+#        print 'Number of frames per period:', chunk_frame_dur
+#            
+#    chunk_start_frame = int(np.floor(chunk_start/ mean_frame_dur))
+#    
+#    traces = []
+#    df_traces=[]
+#   
+#    
+#    if np.shape(event_onset_times):
+#        
+#        for x in range(len(event_onset_times)):
+#            onset_frame_ind= np.argmin(np.abs(frame_ts-event_onset_times[x]))
+#            chunk_start_frame_ind = onset_frame_ind + chunk_start_frame
+#            chunk_end_frame_ind = chunk_start_frame_ind + chunk_frame_dur
+#                    
+#            if verbose:
+#                print 'Period:',int(x),' Starting frame index:',chunk_start_frame_ind,'; Ending frame index', chunk_end_frame_ind
+#            
+#            if chunk_end_frame_ind <= trace.shape[0]:
+#                
+#                curr_trace = trace[chunk_start_frame_ind:chunk_end_frame_ind].astype(np.float32)
+#                traces.append(curr_trace)
+#                
+#                            
+#                df_curr_trace=stim_df_f(curr_trace, baseline_period=abs(chunk_start), frame_rate=30.)
+#                df_traces.append(df_curr_trace)
+#                
+#                
+#            else:
+#                if verbose:
+#                    print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus', chunk_end_frame_ind
+#                continue
+#    
+#    else:
+#        print ('Only single stimulus period found, no averaging performed')
+#        onset_frame_ind= np.argmin(np.abs(frame_ts-event_onset_times))
+#        chunk_start_frame_ind = onset_frame_ind + chunk_start_frame
+#        chunk_end_frame_ind = chunk_start_frame_ind + chunk_frame_dur
+#        
+#        curr_trace=trace[chunk_start_frame_ind:chunk_end_frame_ind].astype(np.float32)
+#        traces = curr_trace
+#        df_traces=stim_df_f(curr_trace, baseline_period=chunk_start, frame_rate=30.)
+#        
+#    if dff==True:
+#        return np.asarray(df_traces)
+#    elif dff==False:
+#        return np.asarray(traces)     
 
-    NOTE: units are important here. The trace, frame_ts, and event_onset_times must be in the same time base (likely seconds)
-    
-    :param trace: full trace that you wish to parse into a stimulus-triggered average (typically fluorescence trace)
-    :param frame_ts: time stamps for when each sample from the trace (above) was captured. Typically this is imaging (2-P) frames.
-    :param eventOnsetTimes: the timestamps for the stimulus/event of interest
-    :param chunkStart: chunk start relative to the stimulus/event of interest
-    :param chunkDur: duration of each chunk from the beginning of chunkstart, typically abs(pre_gap_dur)+post_gap_dur+stim_dur
-    :param dff: whether to return values in terms of change from baseline normalized values (df/f)
-    :param mean_frame_calculation: when calculating the mean duration of each of the frames (from Frame_TS) whether to use mean or median.
-    :return: averaged trace of all chunks
-    '''
-    if mean_frame_calculation=='mean':
-        mean_frame_dur = np.mean(np.diff(frame_ts))
-        
-    elif mean_frame_calculation=='median':
-        mean_frame_dur = np.median(np.diff(frame_ts))
-        
-        
-    chunk_frame_dur = int(np.ceil(chunk_dur / mean_frame_dur))
-       
-    if verbose:
-        print 'Period Duration:', chunk_dur
-        print 'Mean Duration of Each Frame:', mean_frame_dur
-        print 'Number of frames per period:', chunk_frame_dur
-            
-    chunk_start_frame = int(np.floor(chunk_start/ mean_frame_dur))
-    
-    traces = []
-    df_traces=[]
-   
-    
-    if np.shape(event_onset_times):
-        
-        for x in range(len(event_onset_times)):
-            onset_frame_ind= np.argmin(np.abs(frame_ts-event_onset_times[x]))
-            chunk_start_frame_ind = onset_frame_ind + chunk_start_frame
-            chunk_end_frame_ind = chunk_start_frame_ind + chunk_frame_dur
-                    
-            if verbose:
-                print 'Period:',int(x),' Starting frame index:',chunk_start_frame_ind,'; Ending frame index', chunk_end_frame_ind
-            
-            if chunk_end_frame_ind <= trace.shape[0]:
-                
-                curr_trace = trace[chunk_start_frame_ind:chunk_end_frame_ind].astype(np.float32)
-                traces.append(curr_trace)
-                
-                            
-                df_curr_trace=stim_df_f(curr_trace, baseline_period=abs(chunk_start), frame_rate=30.)
-                df_traces.append(df_curr_trace)
-                
-                
-            else:
-                if verbose:
-                    print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus', chunk_end_frame_ind
-                continue
-    
-    else:
-        print ('Only single stimulus period found, no averaging performed')
-        onset_frame_ind= np.argmin(np.abs(frame_ts-event_onset_times))
-        chunk_start_frame_ind = onset_frame_ind + chunk_start_frame
-        chunk_end_frame_ind = chunk_start_frame_ind + chunk_frame_dur
-        
-        curr_trace=trace[chunk_start_frame_ind:chunk_end_frame_ind].astype(np.float32)
-        traces = curr_trace
-        df_traces=stim_df_f(curr_trace, baseline_period=chunk_start, frame_rate=30.)
-        
-    if dff==True:
-        return np.asarray(df_traces)
-    elif dff==False:
-        return np.asarray(traces)     
 
 
-
-def get_event_trig_avg_stamps(trace, time_stamps, event_onset_times, event_end_times, time_before=1, time_after=1, verbose=True):
-    '''
-    Get event-triggered average trace with input being in terms of time-stamps (digital) and with events being irregular and NOT of constant time. (variable periods, digital)
-
-    NOTE: units are important here. The trace, time_stamps, and event_onset_times must be in the same time base (likely seconds)
-    
-    :param trace: full trace that you wish to parse into a stimulus-triggered average (typically fluorescence trace)
-    :param time_stamps: time stamps for when each sample from the trace (above) was captured. Typically this is imaging (2-P) frames.
-    :param event_onset_times: the timestamps for the onset of the event of interest (units of time)
-    :param event_end_times: the timestamps for the end of the event of interest (units of time)
-    :param time_before: how much time before the event onset to include in the sample (units of time)
-    :param time_after: how much time after the event onset to include in the sample (units of time)
-    :return: traces for each onset and end, optionally with time before and after if specified by time_before and time_after
-    '''
-    traces = []
-    n = 0
-
-    for x in range(len(event_onset_times)):
-        onset_frame_ind= np.argmin(np.abs(time_stamps-(event_onset_times[x]-time_before)))
-        end_frame_ind=np.argmin(np.abs(time_stamps-(event_end_times[x]+time_after)))
-        #chunk_start_frame_ind = onset_frame_ind + chunk_start_frame
-        
-        if verbose:
-            print 'Chunk:',int(n),' Starting frame index:',onset_frame_ind,'; Ending frame index', end_frame_ind
-        
-        if end_frame_ind <= trace.shape[0]:
-            
-            curr_trace = trace[onset_frame_ind:end_frame_ind].astype(np.float32)
-            traces.append(curr_trace)
-            n += 1
-        else:
-            if verbose:
-                print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus', end_frame_ind
-            continue
-    return traces
+#def get_event_trig_avg_stamps(trace, time_stamps, event_onset_times, event_end_times, time_before=1, time_after=1, verbose=True):
+#    '''
+#    Get event-triggered average trace with input being in terms of time-stamps (digital) and with events being irregular and NOT of constant time. (variable periods, digital)
+#
+#    NOTE: units are important here. The trace, time_stamps, and event_onset_times must be in the same time base (likely seconds)
+#    
+#    :param trace: full trace that you wish to parse into a stimulus-triggered average (typically fluorescence trace)
+#    :param time_stamps: time stamps for when each sample from the trace (above) was captured. Typically this is imaging (2-P) frames.
+#    :param event_onset_times: the timestamps for the onset of the event of interest (units of time)
+#    :param event_end_times: the timestamps for the end of the event of interest (units of time)
+#    :param time_before: how much time before the event onset to include in the sample (units of time)
+#    :param time_after: how much time after the event onset to include in the sample (units of time)
+#    :return: traces for each onset and end, optionally with time before and after if specified by time_before and time_after
+#    '''
+#    traces = []
+#    n = 0
+#
+#    for x in range(len(event_onset_times)):
+#        onset_frame_ind= np.argmin(np.abs(time_stamps-(event_onset_times[x]-time_before)))
+#        end_frame_ind=np.argmin(np.abs(time_stamps-(event_end_times[x]+time_after)))
+#        #chunk_start_frame_ind = onset_frame_ind + chunk_start_frame
+#        
+#        if verbose:
+#            print 'Chunk:',int(n),' Starting frame index:',onset_frame_ind,'; Ending frame index', end_frame_ind
+#        
+#        if end_frame_ind <= trace.shape[0]:
+#            
+#            curr_trace = trace[onset_frame_ind:end_frame_ind].astype(np.float32)
+#            traces.append(curr_trace)
+#            n += 1
+#        else:
+#            if verbose:
+#                print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus', end_frame_ind
+#            continue
+#    return traces
 
 
 

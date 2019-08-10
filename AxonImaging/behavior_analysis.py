@@ -228,7 +228,7 @@ def threshold_period(signal, threshold, min_low, sample_freq=30.0, irregular_sam
                     exclude_end=np.shape(exclusion_signal)[0]
                     
 
-            elif isinstance(exclusion_dur, (int, long, float)):
+            elif isinstance(exclusion_dur, (int, float)):
                 print ('only single duration timepoint passed. Assuming this timepoint refers to a period prior to the onset of the threshold crossing (start= passed exclusion_dur, end=start of epoch) ')
                 exclude_start=int(round((t_up_conv[ii]-exclusion_dur)*exclusion_sf))
                 exclude_end=t_up_conv[ii]*exclusion_sf
@@ -297,7 +297,7 @@ def threshold_period(signal, threshold, min_low, sample_freq=30.0, irregular_sam
         
         duration=epoch_end[x]-epoch_start[x]
         if duration >= min_time:
-            if isinstance(min_time_between, (int, long, float)) and min_time_between!=0.:
+            if isinstance(min_time_between, (int, float)) and min_time_between!=0.:
                 #dtermine the time between this start period and the next
                 if (x+1) >= len(epoch_start):
                     continue
@@ -394,7 +394,7 @@ def get_STA_traces_stamps(trace, frame_ts, event_onset_times, chunk_start, chunk
             chunk_end_frame_ind = chunk_start_frame_ind + chunk_frame_dur
                     
             if verbose:
-                print 'Period:',int(n),' Starting frame index:',chunk_start_frame_ind,'; Ending frame index', chunk_end_frame_ind
+                print ('Period:' +str(int(n)) + ' Starting frame index:' + str(chunk_start_frame_ind) + ' Ending frame index '+ str(chunk_end_frame_ind))
             
             if chunk_end_frame_ind <= trace.shape[0]:
                 
@@ -407,7 +407,7 @@ def get_STA_traces_stamps(trace, frame_ts, event_onset_times, chunk_start, chunk
                 
                 n += 1
             else:
-                print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus', chunk_end_frame_ind
+                print ('trace length ' + str(trace.shape[0]) + ' is shorter than the referenced start time for the next stimulus ' + str(chunk_end_frame_ind))
                 continue
     
     else:
@@ -450,7 +450,7 @@ def get_event_trig_avg_stamps(trace, time_stamps, event_onset_times, event_end_t
         #chunk_start_frame_ind = onset_frame_ind + chunk_start_frame
         
         if verbose:
-            print 'Chunk:',int(n),' Starting frame index:',onset_frame_ind,'; Ending frame index', end_frame_ind
+            print ('Chunk:' + str(int(n)) + ' Starting frame index:' + str(onset_frame_ind) + '; Ending frame index' + str(end_frame_ind))
         
         if end_frame_ind <= trace.shape[0]:
             
@@ -458,7 +458,7 @@ def get_event_trig_avg_stamps(trace, time_stamps, event_onset_times, event_end_t
             traces.append(curr_trace)
             n += 1
         else:
-            print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus', end_frame_ind
+            print ('trace length'+ str(trace.shape[0]) + ' is shorter than the referenced start time for the next stimulus ' +str(end_frame_ind))
             continue
     return traces
 
@@ -490,8 +490,8 @@ def get_STA_traces_samples (trace, event_onset_times, chunk_start, total_dur, sa
         
     if verbose:
         
-        print '# samples per period:', chunk_dur
-        print 'mean duration of each sample (seconds):', mean_sample_dur
+        print ('# samples per period:' + str(chunk_dur))
+        print ('mean duration of each sample (seconds): ' + str( mean_sample_dur))
     
     traces = []
     n = 0
@@ -505,7 +505,7 @@ def get_STA_traces_samples (trace, event_onset_times, chunk_start, total_dur, sa
         end_trace=start_trace+chunk_dur
         
         if verbose:
-            print 'Period:',int(n),' Starting frame index:',start_trace,'; Ending frame index', end_trace
+            print ('Period:' + str(int(n)) + ' Starting frame index: ' + str(start_trace) + '. Ending frame index '+ str(end_trace))
         
         if end_trace <= trace.shape[0]:
             
@@ -514,7 +514,7 @@ def get_STA_traces_samples (trace, event_onset_times, chunk_start, total_dur, sa
             n += 1
             
         else:
-            print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus'
+            print ('trace length'+ str(trace.shape[0]) + ' is shorter than the referenced start time for the next stimulus ' +str(event_onset_times[x]))
             continue
         
     return traces          
@@ -561,7 +561,7 @@ def get_event_trig_avg_samples (trace, event_onset_times, event_end_times, sampl
             end_trace=np.argmin(np.abs(sample_times-(event_end_times[x]+time_after)))
                    
             if verbose:
-                print 'Period:',int(n),' Starting frame index:',start_trace,'; Ending frame index', end_trace
+                print ('Period:' + str(int(n)) + ' Starting frame index: ' + str(start_trace) + '. Ending frame index '+ str(end_trace))
             
             if end_trace <= trace.shape[0]:
 
@@ -575,7 +575,7 @@ def get_event_trig_avg_samples (trace, event_onset_times, event_end_times, sampl
                 traces.append(curr_trace)
                 n += 1
             else:
-                print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus'
+                print ('trace length'+ str(trace.shape[0]) + ' is shorter than the referenced start time for the next stimulus ' )
                 continue
 
     #take into account times where only a single onset is passed
@@ -604,7 +604,7 @@ def get_event_trig_avg_samples (trace, event_onset_times, event_end_times, sampl
             elif dff==False:
                 curr_trace = trace[start_trace:end_trace].astype(np.float32)
         else:
-            print 'trace length',trace.shape[0],'is shorter than the referenced start time for the next stimulus'
+            print ('trace length ' + str(trace.shape[0]) + ' is shorter than the referenced start time for the next stimulus')
 
         traces=curr_trace
 
@@ -934,7 +934,7 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
     meaned_responses=[]
     
     #check to make sure that the baseline is specified as a tuple and deal with instances where it isn't
-    if isinstance(baseline_period, (int, long, float)):
+    if isinstance(baseline_period, (int, float)):
         print ('the baseline period was specified as a single number, not a start and end time. Assuming start time is time 0 and end time of hte baseline is what is specified.')
         baseline_period=(0,baseline_period)
     
@@ -977,7 +977,7 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
             ends=runs[:,1]
             durs=runs[:,2]
     
-        elif isinstance(override_ends, (int, long, float)):
+        elif isinstance(override_ends, (int, float)):
            #if a number is passed to override the ends, determine the end of the periods by adding this number to the beginning
            print ('Overiding detected durations and using USER-DEFINED durations')
            starts=runs[:,0]
@@ -1024,7 +1024,7 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
                 if response_period[1]=='half':
                     if override_ends==False:
                         response_period_end=response_period[0]+durs[xx]/2.
-                    elif isinstance(override_ends, (int, long, float)):
+                    elif isinstance(override_ends, (int, float)):
 #                            print ('Half duration is passed for end, but overriding durations: calculating duration from half the time of after')
                         response_period_end=response_period[0]+(after/2.)
                             
@@ -1260,7 +1260,7 @@ def create_df_from_timestamps(data,mouse_id,masks,starts,ends,baseline_period,re
                 if override_ends==False:
                     response_period_end=response_period[0]+(ends[xx]-starts[xx])/2.
                     
-                elif isinstance(override_ends, (int, long, float)):
+                elif isinstance(override_ends, (int, float)):
                     response_period_end=response_period[0]+(after/2.)
                         
                 else:
@@ -1517,7 +1517,7 @@ def new_stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
     """
     
     #check to make sure that the baseline is specified as a tuple and deal with instances where it isn't
-    if isinstance(baseline_period, (int, long, float)):
+    if isinstance(baseline_period, (int, float)):
         print ('the baseline period was specified as a single number, not a start and end time. Assuming start time is time 0 and end time of hte baseline is what is specified.')
         baseline_period=(0,baseline_period)
     
@@ -1564,7 +1564,7 @@ def new_stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
             ends=runs[:,1]
             durs=runs[:,2]
     
-        elif isinstance(override_ends, (int, long, float)):
+        elif isinstance(override_ends, (int, float)):
            #if a number is passed to override the ends, determine the end of the periods by adding this number to the beginning
            print ('Overiding detected durations and using USER-DEFINED durations')
            ends=starts+override_ends
@@ -1609,7 +1609,7 @@ def stim_df (paths, data_key, time_stamps_key, stim_dur ,before, after,
     """
     
     #check to make sure that the baseline is specified as a tuple and deal with instances where it isn't
-    if isinstance(baseline_period, (int, long, float)):
+    if isinstance(baseline_period, (int,float)):
         print ('the baseline period was specified as a single number, not a start and end time. Assuming start time is time 0 and end time of hte baseline is what is specified.')
         baseline_period=(0,baseline_period)
     

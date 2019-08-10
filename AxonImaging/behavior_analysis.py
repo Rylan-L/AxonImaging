@@ -1,7 +1,7 @@
 #Author: Rylan Larsen
 
 import numpy as np
-from axonimaging.signal_processing import stim_df_f, significant_response,butter_lowpass_filter
+from AxonImaging.signal_processing import stim_df_f, significant_response,butter_lowpass_filter
 
 import os
 import h5py

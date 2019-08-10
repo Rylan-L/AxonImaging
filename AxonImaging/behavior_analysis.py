@@ -1,78 +1,11 @@
 #Author: Rylan Larsen
 
 import numpy as np
-from AxonImaging.signal_processing import stim_df_f, significant_response,butter_lowpass_filter,threshold_period,signal_to_mean_noise,get_STA_traces_stamps,
-get_event_trig_avg_stamps,get_STA_traces_samples,get_event_trig_avg_samples,downsample_by_target_TS,fast_downsample_by_target_TS,downsample_TS_by_target_TS 
-
 import os
 import h5py
 import pandas as pd
     
-
-
-def threshold_greater(data, threshold=0):
-    #from Jun Zhuang
-    pos = data > threshold
-    return (~pos[:-1] & pos[1:]).nonzero()[0]
-
-
-def last_pos_above_thresh(signal, threshold):
-    '''finds array position greater than a threshold where the next position is less than the threshold. Useful for finding
-    'useful for finding transitions from above a threshold to their end
-    
-    :param pre_thresh_samp Number of before a threshold crossing that must be below the threshold to consider it a threshold crossing, default=1
-    '''
-    return np.flatnonzero((signal[:-1] > threshold) & (signal[1:] < threshold))
-
-def last_pos_above_low_thresh(signal, threshold, low_threshold ):
-    '''finds array position greater than a threshold where the next position is less than a different, low threshold. 
-    Useful for finding for finding high transitions to an arbituary low value
-    
-    :param signal: The trace that you wish to extract threshold transitions from
-    :param threshold: the 'high' threshold. The threshold value that the signal must be above inititially. 
-    :param low_threshold: the 'low' threshold
-    :param pre_thresh_samp: Number of before a threshold crossing that must be below the threshold to consider it a threshold crossing, default=1
-    :param post_thresh_samp: Number of samples after a threshold crossing that must be below the threshold to consider it below the crossing, default=1
-    
-    '''
-    return np.flatnonzero((np.mean(signal[:-1]) > threshold) & (np.mean(signal[1:]) < low_threshold))
-
-def last_pos_below_thresh(signal, threshold,pre_thresh_samp=1):
-    '''finds array position less than a threshold where the next position is above than the threshold. Useful for finding
-    useful for finding transitions from below a threshold to above
-    
-    :param signal: The trace that you wish to extract threshold transitions from
-    :param pre_thresh_samp Number of before a threshold crossing that must be below the threshold to consider it a threshold crossing, default=1
-    '''
-    
-    return np.flatnonzero((signal[:-1] < threshold) & (signal[1:] > threshold))
-
-
-def get_values_from_event_times (signal_trace, signal_ts, events,total_dur=0,relative_time=0):
-    '''Get values from a digitally-sampled trace given event times. Useful for extracting a fluorescence value from a 
-    2-P trace given event times ('what is the fluorescence value at event time x)
-    
-    :param signal_trace: The trace that you wish to extract a value from at a given event time
-    :param signal_ts: the digital time stamps corresponding to the signal_trace
-    :param events: a list of event times
-    :param total_dur: the total duration to sample from after the onset (+/- relative time). If zero, returns a single timepoint
-    :param relative_time: time relative to each event onset for extracting values (seconds, can be negative)
-    
-    '''
-    values=[]
-    
-    for xx in range(len(events)):
-        index=np.argmin(np.abs((signal_ts+relative_time)-events[xx]))
-        
-        if total_dur>0:
-            frame_dur=1/np.mean(np.diff(signal_ts))
-            values.append(signal_trace[index:(index+int(round(total_dur*frame_dur)))])
-        
-        else:
-            values.append(signal_trace[index])
-    return values
-        
- 
+from AxonImaging import signal_processing as sp
 
 def get_processed_running_speed (vsig,vref,sample_freq, smooth_filter_sigma = 0.05, wheel_diameter = 16.51, positive_speed_threshold= 70, negative_speed_threshold= -5):
     ''' Returns the running speed given voltage changes from an encoder wheel. Speeds are smoothed and outlier
@@ -88,7 +21,6 @@ def get_processed_running_speed (vsig,vref,sample_freq, smooth_filter_sigma = 0.
     :param  units: whether to return in terms of seconds (dependent on the passed-in sample freq) or samples
     :return: smooth traced of running speed in cm/s per sample with outliers set to NaN
     '''
-    
     from scipy.ndimage import gaussian_filter1d
 
     vref_mean = np.median(vref[np.abs(vref)<20]) 
@@ -105,14 +37,11 @@ def get_processed_running_speed (vsig,vref,sample_freq, smooth_filter_sigma = 0.
     for n,p in enumerate(mask):
         if p:
             mask2[(n-(2*int(smooth_filter_sigma*sample_freq))):(n+int((2*smooth_filter_sigma*sample_freq+1)))] = True # extend mask 2 filter widths to extend interpolation
-
-                    
+        
     speed_smooth[mask2] = np.interp(np.flatnonzero(mask2), np.flatnonzero(~mask2), speed[~mask2])
-
 
     return speed_smooth
    
-     
 def get_auditory_onset_times(microphone, sample_freq, threshold=1, stdev_samples=10,filter_width=20):
     '''
     Finds the onset of an auditory event through first calculating a standard deviation across user defined samples and then thresholding the stdeviations to find the onset times.
@@ -138,7 +67,7 @@ def get_auditory_onset_times(microphone, sample_freq, threshold=1, stdev_samples
     stdev_filtered=convolve(stdev, boxcar(M=filter_width))
 
     #get the up samples #s through thresholding
-    stamps=threshold_greater(np.array(stdev_filtered),threshold)
+    stamps=sp.threshold_greater(np.array(stdev_filtered),threshold)
 
     #multiply these samples # by user-defined number of stdev_samples to account for the downsampling that occured when the standard deviation was calculated
     stamps=np.multiply(stamps,stdev_samples)
@@ -271,18 +200,18 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
         
         if use_per_thresh==True:
             #first lowpass filter and calculate the median of the trace
-            median=np.nanmedian(butter_lowpass_filter(data[thresh_signal], cutoff=1., analog=True))
+            median=np.nanmedian(sp.butter_lowpass_filter(data[thresh_signal], cutoff=1., analog=True))
             threshold_per=median+(thresh*median)
             thresh=threshold_per
             
         if exclusion_sig=='null':
-            runs=threshold_period(signal=data[thresh_signal], threshold=thresh,
+            runs=sp.threshold_period(signal=data[thresh_signal], threshold=thresh,
                                   min_low=min_l, sample_freq=30., min_time=min_t)
             
         else:
             print (exclusion_logic+'  epochs where the '+ str(exclusion_sig) + ' is greater than '+ str(exclusion_thresh))
             
-            runs=threshold_period(signal=data[thresh_signal], threshold=thresh,min_time_between=min_time_between,
+            runs=sp.threshold_period(signal=data[thresh_signal], threshold=thresh,min_time_between=min_time_between,
                                   min_low=min_l, sample_freq=30., min_time=min_t,exclusion_signal=data[exclusion_sig],
                                   exclusion_dur=exclusion_dur,exclusion_logic=exclusion_logic,
                                   exclusion_thresh=exclusion_thresh)
@@ -337,7 +266,7 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
             #loop for each epoch
             for xx in range(len(starts)):
                 
-                runnings=get_event_trig_avg_samples(data[thresh_signal],event_onset_times=starts[xx],
+                runnings=sp.get_event_trig_avg_samples(data[thresh_signal],event_onset_times=starts[xx],
                               event_end_times=ends[xx],
                               sample_freq=sample_freq,
                               time_before=before, 
@@ -368,7 +297,7 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
    
                 #produce an array that is composed of each ROI's DF/F epeoch
                 
-                axon_responses=get_event_trig_avg_samples(data['axon_traces'][roi],event_onset_times=starts[xx],
+                axon_responses=sp.get_event_trig_avg_samples(data['axon_traces'][roi],event_onset_times=starts[xx],
                               event_end_times=ends[xx],
                               sample_freq=sample_freq,
                               time_before=before, 
@@ -402,7 +331,7 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
                 
                 for extras in other_signals:
                     #get the associated running trace
-                    sig=get_event_trig_avg_samples(data[extras],event_onset_times=starts[xx],
+                    sig=sp.get_event_trig_avg_samples(data[extras],event_onset_times=starts[xx],
                               event_end_times=ends[xx],
                               sample_freq=sample_freq,
                               time_before=before, 
@@ -471,7 +400,7 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
             #therefore use the onset plus and minus the 
             before_after_mean=np.nanmean(before_after_traces,axis=0)
             
-            pvalue=significant_response(before_after_mean, base_period=(baseline_period[0],baseline_period[1]), stim_period=(response_period[0],response_period_end), sample_freq=30.)    
+            pvalue=sp.significant_response(before_after_mean, base_period=(baseline_period[0],baseline_period[1]), stim_period=(response_period[0],response_period_end), sample_freq=30.)    
             if pvalue < 0.05:
                 significant=True
             else:
@@ -497,9 +426,6 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
         column_names.append(str(names) + ' onset sig')
         column_names.append(str(names) + ' peak sig')
         column_names.append(str(names) + ' delta % sig')
-        
-        
-
         
     df=pd.DataFrame(responses,columns=column_names)
     
@@ -532,9 +458,6 @@ def stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
     
     df_mean=df_mean.sort_values(['roi id'])
     df_mean.reset_index(drop=True)
-    
-        
-        
     
     return df,df_mean
 
@@ -595,11 +518,11 @@ def create_df_from_timestamps(data,mouse_id,masks,starts,ends,baseline_period,re
         #check to see if a thresholded signal is passed in. If so extract its parameters    
             if thresh_signal:
                 if override_ends=='starts': 
-                    runnings=get_event_trig_avg_samples(data[thresh_signal],event_onset_times=ends[xx], event_end_times=ends[xx]+1,
+                    runnings=sp.get_event_trig_avg_samples(data[thresh_signal],event_onset_times=ends[xx], event_end_times=ends[xx]+1,
                                                     sample_freq=sample_freq,time_before=before, time_after=after, verbose=False)
                 else:     
                     #get the signal trace that was thresholded
-                    runnings=get_event_trig_avg_samples(data[thresh_signal],event_onset_times=starts[xx],
+                    runnings=sp.get_event_trig_avg_samples(data[thresh_signal],event_onset_times=starts[xx],
                                                             event_end_times=ends[xx],
                                                             sample_freq=sample_freq,
                                                             time_before=before, 
@@ -620,7 +543,7 @@ def create_df_from_timestamps(data,mouse_id,masks,starts,ends,baseline_period,re
                     continue
    
             #produce an array that is composed of each ROI's DF/F epeoch
-            axon_responses=get_event_trig_avg_samples(data['axon_traces'][roi],event_onset_times=starts[xx],
+            axon_responses=sp.get_event_trig_avg_samples(data['axon_traces'][roi],event_onset_times=starts[xx],
                           event_end_times=ends[xx],
                           sample_freq=sample_freq,
                           time_before=before, 
@@ -648,7 +571,7 @@ def create_df_from_timestamps(data,mouse_id,masks,starts,ends,baseline_period,re
             
             for extras in other_signals:
                 #get the associated running trace
-                sig=get_event_trig_avg_samples(data[extras],event_onset_times=starts[xx],
+                sig=sp.get_event_trig_avg_samples(data[extras],event_onset_times=starts[xx],
                           event_end_times=ends[xx],
                           sample_freq=sample_freq,
                           time_before=before, 
@@ -729,7 +652,7 @@ def create_df_from_timestamps(data,mouse_id,masks,starts,ends,baseline_period,re
         #therefore use the onset plus and minus the 
         before_after_mean=np.nanmean(before_after_traces,axis=0)
         
-        pvalue=significant_response(before_after_mean, base_period=(baseline_period[0],baseline_period[1]), stim_period=(response_period[0],response_period_end), sample_freq=30.)    
+        pvalue=sp.significant_response(before_after_mean, base_period=(baseline_period[0],baseline_period[1]), stim_period=(response_period[0],response_period_end), sample_freq=30.)    
         if pvalue < 0.05:
             significant=True
         else:
@@ -849,18 +772,18 @@ def new_stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
         
         if use_per_thresh==True:
             #first lowpass filter and calculate the median of the trace
-            median=np.nanmedian(butter_lowpass_filter(data[thresh_signal], cutoff=1., analog=True))
+            median=np.nanmedian(sp.butter_lowpass_filter(data[thresh_signal], cutoff=1., analog=True))
             threshold_per=median+(thresh*median)
             thresh=threshold_per
             
         if exclusion_sig=='null':
-            runs=threshold_period(signal=data[thresh_signal], threshold=thresh,
+            runs=sp.threshold_period(signal=data[thresh_signal], threshold=thresh,
                                   min_low=min_l, sample_freq=30., min_time=min_t)
             
         else:
             print (exclusion_logic+'  epochs where the '+ str(exclusion_sig) + ' is greater than '+ str(exclusion_thresh))
             
-            runs=threshold_period(signal=data[thresh_signal], threshold=thresh,min_time_between=min_time_between,
+            runs=sp.threshold_period(signal=data[thresh_signal], threshold=thresh,min_time_between=min_time_between,
                                   min_low=min_l, sample_freq=30., min_time=min_t,exclusion_signal=data[exclusion_sig],
                                   exclusion_dur=exclusion_dur,exclusion_logic=exclusion_logic,
                                   exclusion_thresh=exclusion_thresh)
@@ -891,8 +814,6 @@ def new_stimulus_thresh_df (paths,data_key, thresh_signal, thresh, min_l, min_t,
 
     
     return pd.concat(dfs), pd.concat(df_means)
-
-
 
 def stim_df (paths, data_key, time_stamps_key, stim_dur ,before, after, 
              baseline_period,response_period,
